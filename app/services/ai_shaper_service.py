@@ -170,7 +170,11 @@ class AiShaperService:
         both teach the (model, category) matrix) is emitted as a CodeFixOutcome.
         """
         bundle_id = governed.get("context_bundle_id")
-        if not isinstance(bundle_id, str) or not bundle_id.startswith("ctxb_"):
+        # precomputed-context-core's two canonical id shapes — see
+        # context_pack_publisher.py's identical check for why both are valid.
+        if not isinstance(bundle_id, str) or not (
+            bundle_id.startswith("ctxb_") or bundle_id.startswith("ctxb.sha256.")
+        ):
             raise ShaperError(f"missing/invalid governed context_bundle_id: {bundle_id!r}")
 
         if pack is None:

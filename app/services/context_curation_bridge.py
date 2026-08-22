@@ -73,7 +73,11 @@ class ContextCurationBridge:
 def _governed_handle(result: dict) -> dict:
     bundle_id = result.get("context_bundle_id")
     bundle_hash = result.get("bundle_hash")
-    if not isinstance(bundle_id, str) or not bundle_id.startswith("ctxb_"):
+    # precomputed-context-core's two canonical id shapes — see
+    # context_pack_publisher.py's identical check for why both are valid.
+    if not isinstance(bundle_id, str) or not (
+        bundle_id.startswith("ctxb_") or bundle_id.startswith("ctxb.sha256.")
+    ):
         raise ContextCurationError(
             f"missing or invalid governed context_bundle_id: {bundle_id!r} — "
             "refusing to curate an ungoverned bundle"

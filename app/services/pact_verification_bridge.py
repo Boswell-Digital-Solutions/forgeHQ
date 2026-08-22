@@ -162,7 +162,11 @@ def _governed_handle(governed: dict[str, Any]) -> dict[str, Any]:
     task_intent_id = governed.get("task_intent_id")
     bundle_id = governed.get("context_bundle_id")
     bundle_hash = governed.get("bundle_hash") or governed.get("context_bundle_hash")
-    if not isinstance(bundle_id, str) or not bundle_id.startswith("ctxb_"):
+    # precomputed-context-core's two canonical id shapes — see
+    # context_pack_publisher.py's identical check for why both are valid.
+    if not isinstance(bundle_id, str) or not (
+        bundle_id.startswith("ctxb_") or bundle_id.startswith("ctxb.sha256.")
+    ):
         raise PactVerificationError(
             f"missing or invalid governed context_bundle_id: {bundle_id!r}"
         )

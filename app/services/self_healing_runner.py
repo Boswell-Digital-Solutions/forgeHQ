@@ -190,7 +190,15 @@ def build_live_runner(
         return response
 
     shaper = AiShaperService(
-        generator=NeuroForgeGenerator(base_url=neuroforge_url),
+        # Same fleet-service-key env lookup learning_client already uses for
+        # the outcome-emission call below — generation needs it too. Without
+        # this, every non-hygiene fix attempt gets NeuroForge's live chat
+        # ladder with no Authorization header at all: HTTP 401, unconditionally,
+        # regardless of whether NEUROFORGE_API_KEY/NEUROFORGE_SERVICE_KEY is
+        # set in the environment this runner was spawned from.
+        generator=NeuroForgeGenerator(
+            base_url=neuroforge_url, api_key=learning_client._neuroforge_service_key()
+        ),
         # Hygiene fixes (whitespace/EOF newline) are deterministic; the model echoes
         # them back unchanged (fail-closed no-op), so route them to the deterministic
         # generator while everything else goes through NeuroForge's ladder.

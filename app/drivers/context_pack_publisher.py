@@ -64,7 +64,15 @@ def build_pack_body(
     bundle_id = assemble_result.get("context_bundle_id")
     bundle_hash = assemble_result.get("bundle_hash")
     task_intent_id = assemble_result.get("task_intent_id")
-    if not isinstance(bundle_id, str) or not bundle_id.startswith("ctxb_"):
+    # precomputed-context-core's two canonical id shapes: "ctxb_<hash>" (the
+    # original format, still minted as manifest.legacy_context_bundle_id) and
+    # the current algorithm-tagged "ctxb.sha256.<hash>" (manifest's primary
+    # context_bundle_id, what context-runtime actually returns here now).
+    # Accepting both keeps this consuming its context-runtime authority's
+    # real output rather than requiring it downgrade to the legacy shape.
+    if not isinstance(bundle_id, str) or not (
+        bundle_id.startswith("ctxb_") or bundle_id.startswith("ctxb.sha256.")
+    ):
         raise ContextPackPublishError(f"missing/invalid context_bundle_id: {bundle_id!r}")
     if not isinstance(bundle_hash, str) or not bundle_hash.strip():
         raise ContextPackPublishError("missing bundle_hash")
