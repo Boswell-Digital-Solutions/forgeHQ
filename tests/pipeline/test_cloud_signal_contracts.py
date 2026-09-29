@@ -20,6 +20,7 @@ from app.services.cloud_signal_contracts import (
     CloudSignalShaper,
     CloudSignalSubject,
     is_admissible_evidence_source,
+    is_valid_subject,
 )
 
 
@@ -65,6 +66,50 @@ def test_signal_fails_closed_on_missing_signal_id():
 def test_signal_fails_closed_on_missing_service():
     sig = _signal(subject=CloudSignalSubject(service=""))
     assert CloudSignalShaper().build(sig) is None
+
+
+# --- CloudSignalSubject: identity-scoped (widened after a real gap found in
+# CSD-02: forgesentinel's own denial_streak/quota_exceeded_burst detectors
+# never populate a cloud_service, only tenant_id/principal_id) -----------
+
+
+def test_identity_subject_with_tenant_id_is_valid():
+    assert is_valid_subject(CloudSignalSubject(subject_kind="identity", tenant_id="tenant-abc")) is True
+
+
+def test_identity_subject_with_principal_id_is_valid():
+    assert (
+        is_valid_subject(CloudSignalSubject(subject_kind="identity", principal_id="principal-xyz"))
+        is True
+    )
+
+
+def test_identity_subject_with_neither_tenant_nor_principal_is_invalid():
+    assert is_valid_subject(CloudSignalSubject(subject_kind="identity")) is False
+
+
+def test_unknown_subject_kind_is_invalid():
+    assert is_valid_subject(CloudSignalSubject(subject_kind="mystery", service="x")) is False
+
+
+def test_signal_accepts_identity_scoped_subject():
+    sig = _signal(subject=CloudSignalSubject(subject_kind="identity", tenant_id="tenant-abc"))
+    assert CloudSignalShaper().build(sig) is not None
+
+
+def test_signal_fails_closed_on_identity_subject_with_no_identity_fields():
+    sig = _signal(subject=CloudSignalSubject(subject_kind="identity"))
+    assert CloudSignalShaper().build(sig) is None
+
+
+def test_service_subject_identity_key_is_service_prefixed():
+    subject = CloudSignalSubject(service="neuroforge")
+    assert subject.identity_key == "service:neuroforge"
+
+
+def test_identity_subject_identity_key_carries_both_tenant_and_principal():
+    subject = CloudSignalSubject(subject_kind="identity", tenant_id="t1", principal_id="p1")
+    assert subject.identity_key == "identity:t1:p1"
 
 
 def test_signal_fails_closed_on_unknown_severity():
@@ -153,6 +198,19 @@ def test_candidate_id_is_deterministic_and_namespaced():
     assert a is not None and b is not None
     assert a.candidate_id == b.candidate_id
     assert a.candidate_id.startswith("forgehq-cloud-candidate-")
+
+
+def test_candidate_accepts_identity_scoped_subject_and_differs_from_service_scoped():
+    identity_subject = CloudSignalSubject(subject_kind="identity", tenant_id="tenant-abc")
+    a = CloudProposalCandidateShaper().build(**_candidate_kwargs(subject=identity_subject))
+    b = CloudProposalCandidateShaper().build(**_candidate_kwargs())  # service-scoped default
+    assert a is not None and b is not None
+    assert a.candidate_id != b.candidate_id
+
+
+def test_candidate_fails_closed_on_identity_subject_with_no_identity_fields():
+    empty_identity = CloudSignalSubject(subject_kind="identity")
+    assert CloudProposalCandidateShaper().build(**_candidate_kwargs(subject=empty_identity)) is None
 
 
 def test_candidate_id_is_keyed_on_fingerprint_not_prose():

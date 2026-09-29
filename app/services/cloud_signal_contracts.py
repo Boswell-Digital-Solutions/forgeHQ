@@ -70,10 +70,44 @@ def is_admissible_evidence_source(source_ref: str) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class CloudSignalSubject:
-    """What the signal is about: a deployed service, not a repo file."""
+    """What the signal is about -- either a deployed service (`subject_kind`
+    "service") or a principal/tenant identity (`subject_kind` "identity").
 
-    service: str
+    Widened from service-only after finding forgesentinel's two real
+    detectors (`denial_streak`, `quota_exceeded_burst`,
+    `src/watchdog/decisions.ts`) never populate `scope.cloud_service` at
+    all -- they are principal/tenant-scoped identity anomalies, not
+    service-outage observations, and forcing a `service` value onto them
+    would mean inventing one. `subject_kind` defaults to "service" so every
+    existing service-scoped construction stays valid unchanged."""
+
+    subject_kind: str = "service"
     environment: str = "production"
+    service: str | None = None
+    tenant_id: str | None = None
+    principal_id: str | None = None
+
+    @property
+    def identity_key(self) -> str:
+        """A stable identity string for fingerprinting/display, independent
+        of `subject_kind`."""
+        if self.subject_kind == "service":
+            return f"service:{self.service}"
+        return f"identity:{self.tenant_id or ''}:{self.principal_id or ''}"
+
+
+def is_valid_subject(subject: CloudSignalSubject) -> bool:
+    """Shared validity rule for both `CloudSignal` and
+    `CloudProposalCandidate` subjects, so the two shapers can't drift apart
+    on what counts as a real subject."""
+    if subject.subject_kind == "service":
+        return bool(subject.service and subject.service.strip())
+    if subject.subject_kind == "identity":
+        return bool(
+            (subject.tenant_id and subject.tenant_id.strip())
+            or (subject.principal_id and subject.principal_id.strip())
+        )
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +160,7 @@ class CloudSignalShaper:
         s = signal
         if not s.signal_id.strip() or not s.source_system.strip() or not s.source_kind.strip():
             return None
-        if not s.subject.service.strip():
+        if not is_valid_subject(s.subject):
             return None
         if not s.issue_class.strip() or not s.summary.strip() or not s.observed_at.strip():
             return None
@@ -173,7 +207,7 @@ class CloudProposalCandidate:
         # CloudProposal.event_id (title-keyed); new automated candidates get
         # it from day one rather than repeating that mistake.
         digest = hashlib.sha256(
-            f"{self.subject.service}\0{self.subject.environment}\0"
+            f"{self.subject.identity_key}\0{self.subject.environment}\0"
             f"{self.issue_class}\0{self.correlation_fingerprint}".encode()
         ).hexdigest()[:16]
         return f"forgehq-cloud-candidate-{digest}"
@@ -198,7 +232,7 @@ class CloudProposalCandidateShaper:
         evidence_artifact_ids: tuple[str, ...] = (),
         constraints: tuple[str, ...] = (),
     ) -> CloudProposalCandidate | None:
-        if not subject.service.strip() or not issue_class.strip():
+        if not is_valid_subject(subject) or not issue_class.strip():
             return None
         if severity not in _VALID_SEVERITIES:
             return None
