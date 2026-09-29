@@ -112,6 +112,29 @@ def test_identity_subject_identity_key_carries_both_tenant_and_principal():
     assert subject.identity_key == "identity:t1:p1"
 
 
+# --- CloudSignalSubject: repository-scoped (widened again for CSD-06: a
+# GitHub Actions workflow failure is scoped to a repository, not a service
+# or an identity) -----------------------------------------------------
+
+
+def test_repository_subject_with_repository_is_valid():
+    assert is_valid_subject(CloudSignalSubject(subject_kind="repository", repository="org/repo")) is True
+
+
+def test_repository_subject_with_no_repository_is_invalid():
+    assert is_valid_subject(CloudSignalSubject(subject_kind="repository")) is False
+
+
+def test_repository_subject_identity_key_is_repository_prefixed():
+    subject = CloudSignalSubject(subject_kind="repository", repository="Boswell-Digital-Solutions/forgeHQ")
+    assert subject.identity_key == "repository:Boswell-Digital-Solutions/forgeHQ"
+
+
+def test_signal_accepts_repository_scoped_subject():
+    sig = _signal(subject=CloudSignalSubject(subject_kind="repository", repository="org/repo"))
+    assert CloudSignalShaper().build(sig) is not None
+
+
 def test_signal_fails_closed_on_unknown_severity():
     assert CloudSignalShaper().build(_signal(severity="apocalyptic")) is None
 
