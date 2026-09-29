@@ -49,8 +49,8 @@ class CorrelatedSignalGroup:
         return tuple(s.signal_id for s in self.signals)
 
     @property
-    def subject_service(self) -> str:
-        return self.signals[0].subject.service
+    def subject_identity_key(self) -> str:
+        return self.signals[0].subject.identity_key
 
     @property
     def highest_severity_signal(self) -> CloudSignal:

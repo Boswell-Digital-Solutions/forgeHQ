@@ -78,15 +78,38 @@ class ShadowConversionSummary:
         return self.converted / self.total if self.total else 0.0
 
 
-def _correlation_fingerprint(*, cloud_service: str, detector: str, tenant_id: str | None) -> str:
-    # Groups repeated findings of the same detector, on the same service and
-    # tenant, into one identity -- the correlation key this slice's own
-    # candidate contract (CSD-01) is keyed on. No environment dimension
-    # exists on CloudSecurityFinding, so this fingerprint intentionally omits
-    # it (CloudSignalSubject still defaults environment to "production").
-    digest = hashlib.sha256(
-        f"{cloud_service}\0{detector}\0{tenant_id or ''}".encode()
-    ).hexdigest()[:16]
+def _finding_subject(scope: dict) -> CloudSignalSubject | None:
+    """Build the right subject kind from a finding's `scope` block.
+
+    forgesentinel's two real detectors (`denial_streak`, `quota_exceeded_burst`,
+    `src/watchdog/decisions.ts`) only ever set `scope.tenant_id` /
+    `scope.principal_id` -- `scope.cloud_service` is never populated, because
+    these are principal/tenant-scoped identity anomalies, not service-outage
+    observations. Prefer a service subject when one is actually named (a
+    future service-scoped detector); fall back to an identity subject when
+    only tenant/principal identity is present; fail closed (None) when
+    neither exists.
+    """
+    cloud_service = scope.get("cloud_service")
+    tenant_id = scope.get("tenant_id")
+    principal_id = scope.get("principal_id")
+
+    if cloud_service:
+        return CloudSignalSubject(subject_kind="service", service=cloud_service)
+    if tenant_id or principal_id:
+        return CloudSignalSubject(
+            subject_kind="identity", tenant_id=tenant_id, principal_id=principal_id
+        )
+    return None
+
+
+def _correlation_fingerprint(*, subject: CloudSignalSubject, detector: str) -> str:
+    # Groups repeated findings of the same detector, on the same subject,
+    # into one identity -- the correlation key this slice's own candidate
+    # contract (CSD-01) is keyed on. No environment dimension exists on
+    # CloudSecurityFinding, so this fingerprint intentionally omits it
+    # (CloudSignalSubject still defaults environment to "production").
+    digest = hashlib.sha256(f"{subject.identity_key}\0{detector}".encode()).hexdigest()[:16]
     return f"fp-cssa-{digest}"
 
 
@@ -98,9 +121,9 @@ def cssa_finding_to_cloud_signal(
     """Build a `CloudSignal` from a raw `cloud_security.finding.v1` payload.
 
     Fails closed (returns None) on a missing required field, an unmapped
-    severity, or a finding with no `scope.cloud_service` -- without a cloud
-    subject there is no service to attach the signal to, and this adapter
-    does not invent one.
+    severity, or a finding with no usable subject at all -- neither
+    `scope.cloud_service` nor `scope.tenant_id`/`scope.principal_id`. This
+    adapter does not invent a subject; see `_finding_subject`.
 
     `producer_version` is supplied by the caller (the version of the
     detector/adapter pipeline that produced this signal), not read from the
@@ -110,8 +133,6 @@ def cssa_finding_to_cloud_signal(
     detector = finding.get("detector")
     severity_raw = finding.get("severity")
     scope = finding.get("scope") or {}
-    cloud_service = scope.get("cloud_service")
-    tenant_id = scope.get("tenant_id")
     evidence_refs = finding.get("evidence_refs") or []
     summary = finding.get("summary")
     emitted_at = finding.get("emitted_at")
@@ -119,8 +140,8 @@ def cssa_finding_to_cloud_signal(
 
     if not finding_id or not detector or not summary or not emitted_at:
         return None
-    if not cloud_service:
-        # No cloud subject named -- fail closed rather than guess one.
+    subject = _finding_subject(scope)
+    if subject is None:
         return None
     if severity_raw not in _SEVERITY_MAP:
         return None
@@ -128,9 +149,7 @@ def cssa_finding_to_cloud_signal(
         return None
 
     severity = _SEVERITY_MAP[severity_raw]
-    fingerprint = _correlation_fingerprint(
-        cloud_service=cloud_service, detector=detector, tenant_id=tenant_id
-    )
+    fingerprint = _correlation_fingerprint(subject=subject, detector=detector)
     # Wrap each raw evidence ref in forgeHQ's admissible signal:// namespace.
     # CloudSecurityFinding.evidence_refs carries opaque identifiers with no
     # URI convention of its own -- the adapter boundary is exactly where that
@@ -142,7 +161,7 @@ def cssa_finding_to_cloud_signal(
         signal_id=f"cssa-{finding_id}",
         source_system=SOURCE_SYSTEM,
         source_kind=SOURCE_KIND,
-        subject=CloudSignalSubject(service=cloud_service),
+        subject=subject,
         issue_class=detector,
         severity=severity,
         observed_at=emitted_at,
