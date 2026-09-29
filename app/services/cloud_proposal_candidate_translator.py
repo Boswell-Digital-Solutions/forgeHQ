@@ -11,8 +11,8 @@ from the candidate's own structured data (`facts`, `recommended_action_class`,
 `subject`, `constraints`) via a per-`recommended_action_class` template, not
 inferred. Covers every `recommended_action_class` CSD-04's composer can
 currently produce (`denial_streak`/`quota_exceeded_burst`/
-`ci_workflow_failure`/`deploy_failure`); an unmapped action class fails
-closed rather than composing generic prose -- UNLESS the caller explicitly
+`ci_workflow_failure`/`ci_startup_failure`/`deploy_failure`); an unmapped
+action class fails closed rather than composing generic prose -- UNLESS the caller explicitly
 opts into bounded AI composition (CSD-09, `cloud_proposal_ai_composer.py`)
 by passing `ai_generator`. Opt-in only: every existing call site that
 doesn't pass one keeps today's exact fail-closed behavior on an unmapped
@@ -81,6 +81,18 @@ _ACTION_TEMPLATES: dict[str, _ActionTemplate] = {
         expected_gain=(
             "Confirms whether the CI failure reflects a real regression, surfacing it for "
             "review before it blocks or masks other work."
+        ),
+    ),
+    "investigate_ci_startup_failure": _ActionTemplate(
+        title="Investigate CI workflow startup failure for {scope}",
+        recommended_action=(
+            "Confirm why the workflow runs did not start. Check the repository's Actions "
+            "status, the account or billing state, runner availability and the workflow "
+            "configuration, before retrying any run."
+        ),
+        expected_gain=(
+            "Restores CI for the repository, or confirms the cause is outside it, before "
+            "more changes merge without checks."
         ),
     ),
     "investigate_deploy_failure": _ActionTemplate(

@@ -109,3 +109,58 @@ def test_adapter_fingerprint_differs_across_repos_same_workflow():
     )
     assert a is not None and b is not None
     assert a.correlation.fingerprint != b.correlation.fingerprint
+
+
+# --- branch scope and startup_failure -----------------------------------
+
+
+def _startup_run(**overrides):
+    # Real shape (Forge_Command, 2026-09-29): empty name, placeholder path.
+    return _run(name="", path="BuildFailed", conclusion="startup_failure", **overrides)
+
+
+def test_failure_fingerprint_differs_across_branches():
+    a = github_workflow_run_to_cloud_signal(_run(head_branch="main"), producer_version="1.0.0")
+    b = github_workflow_run_to_cloud_signal(_run(head_branch="pr-branch"), producer_version="1.0.0")
+    assert a is not None and b is not None
+    assert a.correlation.fingerprint != b.correlation.fingerprint
+
+
+def test_failure_summary_names_the_branch():
+    signal = github_workflow_run_to_cloud_signal(_run(head_branch="pr-branch"), producer_version="1.0.0")
+    assert signal is not None
+    assert "Boswell-Digital-Solutions/forgeHQ@pr-branch" in signal.summary
+
+
+def test_failure_without_a_branch_fails_closed():
+    assert github_workflow_run_to_cloud_signal(_run(head_branch=None), producer_version="1.0.0") is None
+
+
+def test_startup_failure_with_an_empty_name_is_converted():
+    signal = github_workflow_run_to_cloud_signal(_startup_run(), producer_version="1.0.0")
+    assert signal is not None
+    assert signal.issue_class == "ci_startup_failure"
+    assert signal.severity == "high"
+    assert signal.subject.subject_kind == "repository"
+
+
+def test_startup_failure_fingerprint_ignores_branch_and_run():
+    a = github_workflow_run_to_cloud_signal(_startup_run(id=1, head_branch="main"), producer_version="1.0.0")
+    b = github_workflow_run_to_cloud_signal(_startup_run(id=2, head_branch="feature"), producer_version="1.0.0")
+    assert a is not None and b is not None
+    assert a.correlation.fingerprint == b.correlation.fingerprint
+
+
+def test_startup_failure_summary_states_only_that_the_run_did_not_start():
+    signal = github_workflow_run_to_cloud_signal(_startup_run(), producer_version="1.0.0")
+    assert signal is not None
+    assert "did not start" in signal.summary
+    for cause in ("billing", "quota", "runner", "permission"):
+        assert cause not in signal.summary.lower()  # no cause is asserted
+
+
+def test_startup_failure_and_failure_have_different_fingerprints():
+    a = github_workflow_run_to_cloud_signal(_run(), producer_version="1.0.0")
+    b = github_workflow_run_to_cloud_signal(_startup_run(), producer_version="1.0.0")
+    assert a is not None and b is not None
+    assert a.correlation.fingerprint != b.correlation.fingerprint

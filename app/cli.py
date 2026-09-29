@@ -30,6 +30,7 @@ from typing import Any
 from app.drivers.healing_publisher import DEFAULT_DATAFORGE_LOCAL_URL, publish_healing_proposal
 from app.drivers.learning_client import DEFAULT_NEUROFORGE_URL
 from app.schemas.code_fix_outcome import CodeFixOutcome
+from app.services.ci_shadow import run_ci_shadow
 from app.services.cloud_proposal_shaper import (
     CloudProposalInput,
     CloudProposalShaper,
@@ -275,6 +276,20 @@ def run_cloud_propose(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_ci_shadow_cmd(args: argparse.Namespace) -> int:
+    """Read-only: fetch real failed GitHub runs, push them through the detector
+    pipeline, print a yield report. Publishes nothing."""
+    report = run_ci_shadow(
+        args.repo,
+        producer_version="ci-shadow-1",
+        per_page=args.per_page,
+        max_age_days=args.max_age_days or None,
+    )
+    _emit_json({"status": "ok", "mode": "shadow", **report.to_dict()})
+    # Non-zero only when EVERY repo failed to fetch -- partial data is still data.
+    return 1 if report.errors and len(report.errors) == len(report.repositories) else 0
+
+
 def run_health(_args: argparse.Namespace) -> int:
     """Bounded, producer-owned self-check for the ecosystem-health topology.
 
@@ -397,6 +412,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.getenv("FORGEHQ_DATAFORGE_LOCAL_URL", DEFAULT_DATAFORGE_LOCAL_URL),
     )
     cp.set_defaults(func=run_cloud_propose)
+
+    ci = sub.add_parser(
+        "ci-shadow",
+        help="Read real failed GitHub Actions runs through the detector pipeline; publish nothing.",
+    )
+    ci.add_argument(
+        "--repo", action="append", required=True, metavar="OWNER/NAME",
+        help="Repository to read (repeatable).",
+    )
+    ci.add_argument("--per-page", type=int, default=100, help="Recent runs to read per repo, 1-100.")
+    ci.add_argument(
+        "--max-age-days", type=int, default=14,
+        help="Skip failures older than this many days (0 = no limit).",
+    )
+    ci.set_defaults(func=run_ci_shadow_cmd)
 
     hp = sub.add_parser("health", help="Bounded self-check for the ecosystem-health topology.")
     hp.set_defaults(func=run_health)
