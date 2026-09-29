@@ -26,11 +26,14 @@ Found by running it on real repositories (see docs/KNOWN_ISSUES.md): without
 these checks it proposed month-old failures that had since cleared, and it
 could not see `startup_failure` at all.
 
-KNOWN LIMIT, stated so the numbers are not over-read: the eligibility gate is
-called with no open-proposal or cooldown knowledge (there is no read of
-DataForge-Local here), so `eligible_ignoring_suppression` counts groups that
-would be eligible *ignoring* suppression. Publishing would need that read
-first.
+SUPPRESSION. When given the store's suppression sets (a read-only GET of
+DataForge-Local via `proposal_store_reader`), the gate answers DUPLICATE for a
+fingerprint that already has an open proposal and SUPPRESSED for one an
+operator decided within the cooldown. The report keeps both numbers:
+`eligible_ignoring_suppression` and `would_publish` (after suppression). If
+the store cannot be read, `would_publish` is null and the status says why --
+it is never guessed. Proposals published before the fingerprint was carried
+in the envelope cannot suppress anything (counted in the report).
 
 A repository that cannot be fetched is reported under `errors` and skipped;
 one bad repo never hides the others' results.
@@ -42,12 +45,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from app.drivers.github_actions_client import GitHubFetchError, fetch_recent_runs
+from app.drivers.proposal_store_reader import ProposalStoreError, read_cloud_proposals
 from app.services.cloud_proposal_composer import CloudProposalComposer
 from app.services.cloud_signal_correlation import (
     ELIGIBLE,
     CloudProposalEligibilityGate,
     CloudSignalCorrelator,
 )
+from app.services.proposal_suppression import SuppressionSets, build_suppression_sets
 from app.services.github_workflow_adapter import (
     CONCLUSION_FAILURE,
     CONCLUSION_STARTUP_FAILURE,
@@ -63,6 +68,7 @@ class CiGroupReport:
     fingerprint: str
     signal_count: int
     decision: str
+    decision_ignoring_suppression: str
     confidence_band: str | None
     composed: bool
     sample_summary: str
@@ -79,9 +85,17 @@ class CiShadowReport:
     signals_rejected: int = 0
     groups: list[CiGroupReport] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)
+    suppression_status: str = "not_read"
+    suppression: SuppressionSets | None = None
 
     @property
     def eligible(self) -> int:
+        return sum(1 for g in self.groups if g.decision_ignoring_suppression == ELIGIBLE)
+
+    @property
+    def would_publish(self) -> int | None:
+        if self.suppression is None:
+            return None
         return sum(1 for g in self.groups if g.decision == ELIGIBLE)
 
     @property
@@ -99,6 +113,23 @@ class CiShadowReport:
             "signals_rejected": self.signals_rejected,
             "groups": len(self.groups),
             "eligible_ignoring_suppression": self.eligible,
+            "duplicate_groups": sum(1 for g in self.groups if g.decision == "duplicate"),
+            "suppressed_groups": sum(1 for g in self.groups if g.decision == "suppressed"),
+            "would_publish": self.would_publish,
+            "suppression": {
+                "status": self.suppression_status,
+                "rows_read": self.suppression.rows_read if self.suppression else None,
+                "rows_without_fingerprint": (
+                    self.suppression.rows_without_fingerprint if self.suppression else None
+                ),
+                "open": len(self.suppression.open_fingerprints) if self.suppression else None,
+                "cooling_down": (
+                    len(self.suppression.cooling_down_fingerprints) if self.suppression else None
+                ),
+                "truncated_statuses": (
+                    list(self.suppression.truncated_statuses) if self.suppression else None
+                ),
+            },
             "composed_candidates": self.composed,
             "errors": self.errors,
             "group_detail": [
@@ -108,6 +139,7 @@ class CiShadowReport:
                     "fingerprint": g.fingerprint,
                     "signals": g.signal_count,
                     "decision": g.decision,
+                    "decision_ignoring_suppression": g.decision_ignoring_suppression,
                     "confidence": g.confidence_band,
                     "composed": g.composed,
                     "sample": g.sample_summary,
@@ -149,6 +181,20 @@ def _recovered(run: dict, created: datetime, successes: list[tuple[datetime, str
     return any(t > created and n == name and b == branch for t, n, b in successes)
 
 
+def load_suppression(
+    *,
+    base_url: str,
+    cooldown_days: int = 14,
+    read=read_cloud_proposals,
+) -> tuple[SuppressionSets | None, str]:
+    """(sets, status). On any read failure: (None, "unavailable: <reason>")."""
+    try:
+        snapshot = read(base_url=base_url)
+    except ProposalStoreError as exc:
+        return None, f"unavailable: {exc}"
+    return build_suppression_sets(snapshot, cooldown_days=cooldown_days), "ok"
+
+
 def run_ci_shadow(
     repositories: list[str],
     *,
@@ -157,9 +203,14 @@ def run_ci_shadow(
     max_age_days: int | None = 14,
     now: datetime | None = None,
     fetch: Callable[..., list[dict]] = fetch_recent_runs,
+    suppression: SuppressionSets | None = None,
+    suppression_status: str = "not_read",
 ) -> CiShadowReport:
-    """`max_age_days=None` disables the recency window."""
+    """`max_age_days=None` disables the recency window. `suppression` is the
+    store's open/cooling-down fingerprints; None means it was not read."""
     report = CiShadowReport(repositories=list(repositories))
+    report.suppression = suppression
+    report.suppression_status = suppression_status
     cutoff = None
     if max_age_days is not None:
         cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=max_age_days)
@@ -195,7 +246,16 @@ def run_ci_shadow(
     gate = CloudProposalEligibilityGate()
     composer = CloudProposalComposer()
     for group in CloudSignalCorrelator().correlate(signals):
-        outcome = gate.evaluate(group)
+        raw = gate.evaluate(group)
+        outcome = (
+            gate.evaluate(
+                group,
+                open_proposal_fingerprints=suppression.open_fingerprints,
+                suppressed_fingerprints=suppression.cooling_down_fingerprints,
+            )
+            if suppression is not None
+            else raw
+        )
         candidate = composer.compose(group, outcome)
         first = group.signals[0]
         report.groups.append(
@@ -205,6 +265,7 @@ def run_ci_shadow(
                 fingerprint=group.fingerprint,
                 signal_count=len(group.signals),
                 decision=outcome.decision,
+                decision_ignoring_suppression=raw.decision,
                 confidence_band=outcome.confidence_band,
                 composed=candidate is not None,
                 sample_summary=first.summary,

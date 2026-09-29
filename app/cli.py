@@ -30,7 +30,7 @@ from typing import Any
 from app.drivers.healing_publisher import DEFAULT_DATAFORGE_LOCAL_URL, publish_healing_proposal
 from app.drivers.learning_client import DEFAULT_NEUROFORGE_URL
 from app.schemas.code_fix_outcome import CodeFixOutcome
-from app.services.ci_shadow import run_ci_shadow
+from app.services.ci_shadow import load_suppression, run_ci_shadow
 from app.services.cloud_proposal_shaper import (
     CloudProposalInput,
     CloudProposalShaper,
@@ -279,11 +279,18 @@ def run_cloud_propose(args: argparse.Namespace) -> int:
 def run_ci_shadow_cmd(args: argparse.Namespace) -> int:
     """Read-only: fetch real failed GitHub runs, push them through the detector
     pipeline, print a yield report. Publishes nothing."""
+    suppression, status = None, "not_read"
+    if not args.no_suppression_read:
+        suppression, status = load_suppression(
+            base_url=args.dataforge_local_url, cooldown_days=args.cooldown_days
+        )
     report = run_ci_shadow(
         args.repo,
         producer_version="ci-shadow-1",
         per_page=args.per_page,
         max_age_days=args.max_age_days or None,
+        suppression=suppression,
+        suppression_status=status,
     )
     _emit_json({"status": "ok", "mode": "shadow", **report.to_dict()})
     # Non-zero only when EVERY repo failed to fetch -- partial data is still data.
@@ -425,6 +432,19 @@ def build_parser() -> argparse.ArgumentParser:
     ci.add_argument(
         "--max-age-days", type=int, default=14,
         help="Skip failures older than this many days (0 = no limit).",
+    )
+    ci.add_argument(
+        "--dataforge-local-url",
+        default=os.getenv("FORGEHQ_DATAFORGE_LOCAL_URL", DEFAULT_DATAFORGE_LOCAL_URL),
+        help="Read-only: list existing cloud proposals to suppress duplicates.",
+    )
+    ci.add_argument(
+        "--cooldown-days", type=int, default=14,
+        help="Suppress a fingerprint an operator decided within this many days.",
+    )
+    ci.add_argument(
+        "--no-suppression-read", action="store_true",
+        help="Do not read DataForge-Local; would_publish is then null.",
     )
     ci.set_defaults(func=run_ci_shadow_cmd)
 

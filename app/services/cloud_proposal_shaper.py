@@ -60,6 +60,11 @@ class CloudProposalInput:
     confidence_band: str = "medium"
     alternatives: list[str] = field(default_factory=list)
     diagnostic_artifact_ids: list[str] = field(default_factory=list)
+    # Set by the detector pipeline (CSD) so a published proposal can later be
+    # matched to the incident that produced it -- the eligibility gate
+    # suppresses on this. None for hand-composed proposals, which therefore
+    # can never suppress anything.
+    correlation_fingerprint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,5 +139,12 @@ def to_cloud_proposal_envelope(proposal: CloudProposal) -> dict:
             "riskSummary": i.risk_summary,
             "alternatives": list(i.alternatives),
             "diagnosticArtifactIds": list(i.diagnostic_artifact_ids),
+            # Only present when set, so envelopes for hand-composed
+            # proposals are byte-for-byte what they were before.
+            **(
+                {"correlationFingerprint": i.correlation_fingerprint}
+                if i.correlation_fingerprint
+                else {}
+            ),
         },
     }
