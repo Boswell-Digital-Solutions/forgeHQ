@@ -158,3 +158,145 @@ def test_validator_does_not_penalize_signal_id_digits_in_evidence_summary():
     )
     accepted, reason = validate_composed_prose(candidate, prose)
     assert accepted, reason
+
+
+# --- NeuroForgeCompositionGenerator (real backend, fake transport only) ----
+#
+# No test here makes a network call: `transport` is always injected, and the
+# credential env vars are cleared/pinned per test so a real key in the
+# developer's shell can never leak into (or be needed by) a test.
+
+import json
+
+import pytest
+
+from app.services.cloud_proposal_ai_composer import (
+    NeuroForgeCompositionGenerator,
+    _parse_prose,
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_credentials(monkeypatch):
+    monkeypatch.delenv("NEUROFORGE_API_KEY", raising=False)
+    monkeypatch.delenv("NEUROFORGE_SERVICE_KEY", raising=False)
+
+
+_GOOD_REPLY = {
+    "title": "Investigate the denial pattern",
+    "problem_statement": "3 block/quarantine decisions for principal principal-xyz within 15m (threshold 3).",
+    "evidence_summary": "1 correlated signal(s): cssa-finding-001.",
+    "scope_summary": "Tenant tenant-abc, principal principal-xyz.",
+    "recommended_action": "Review the decisions before changing any policy.",
+    "expected_gain": "Confirms whether the pattern is expected.",
+    "risk_summary": "no production mutation authorized",
+    "alternatives": ["Do nothing and observe"],
+}
+
+
+class _RecordingTransport:
+    def __init__(self, content):
+        self.content = content
+        self.calls = []
+
+    def __call__(self, url, body, headers, timeout):
+        self.calls.append((url, body, headers, timeout))
+        return {"content": self.content}
+
+
+def test_neuroforge_generator_returns_prose_from_a_valid_json_reply():
+    transport = _RecordingTransport(json.dumps(_GOOD_REPLY))
+    gen = NeuroForgeCompositionGenerator(api_key="test-key", transport=transport)
+    prose = gen.compose(_candidate())
+    assert prose is not None
+    assert prose.title == _GOOD_REPLY["title"]
+    assert prose.alternatives == ("Do nothing and observe",)
+
+
+def test_neuroforge_generator_output_still_passes_the_fact_validator():
+    transport = _RecordingTransport(json.dumps(_GOOD_REPLY))
+    gen = NeuroForgeCompositionGenerator(api_key="test-key", transport=transport)
+    candidate = _candidate()
+    prose = gen.compose(candidate)
+    assert prose is not None
+    accepted, reason = validate_composed_prose(candidate, prose)
+    assert accepted, reason
+
+
+def test_neuroforge_generator_sends_bearer_auth_to_the_chat_endpoint():
+    transport = _RecordingTransport(json.dumps(_GOOD_REPLY))
+    NeuroForgeCompositionGenerator(
+        base_url="https://nf.example/", api_key="test-key", transport=transport
+    ).compose(_candidate())
+    url, body, headers, _timeout = transport.calls[0]
+    assert url == "https://nf.example/api/v1/chat"
+    assert headers["Authorization"] == "Bearer test-key"
+    assert body["task_type"] == "cloud_proposal_composition"
+    assert body["temperature"] == 0.0
+
+
+def test_neuroforge_generator_fails_closed_without_a_key_and_never_calls_out():
+    transport = _RecordingTransport(json.dumps(_GOOD_REPLY))
+    gen = NeuroForgeCompositionGenerator(transport=transport)
+    assert gen.compose(_candidate()) is None
+    assert transport.calls == []  # never sends an unauthenticated request
+
+
+def test_neuroforge_generator_reads_key_from_env_at_call_time(monkeypatch):
+    transport = _RecordingTransport(json.dumps(_GOOD_REPLY))
+    gen = NeuroForgeCompositionGenerator(transport=transport)
+    monkeypatch.setenv("NEUROFORGE_SERVICE_KEY", "env-key")
+    assert gen.compose(_candidate()) is not None
+    assert transport.calls[0][2]["Authorization"] == "Bearer env-key"
+
+
+def test_neuroforge_generator_prompt_contains_only_bounded_candidate_data():
+    transport = _RecordingTransport(json.dumps(_GOOD_REPLY))
+    candidate = _candidate(correlation_fingerprint="fp-SECRET-FINGERPRINT")
+    NeuroForgeCompositionGenerator(api_key="k", transport=transport).compose(candidate)
+    _url, body, _headers, _timeout = transport.calls[0]
+    sent = json.dumps(body)
+    assert "fp-SECRET-FINGERPRINT" not in sent  # fingerprint never leaves
+    assert "cssa-finding-001" not in sent  # signal ids never leave
+    assert candidate.facts[0] in sent  # the facts do
+
+
+def test_neuroforge_generator_fails_closed_on_transport_error():
+    def boom(url, body, headers, timeout):
+        raise OSError("connection refused")
+
+    gen = NeuroForgeCompositionGenerator(api_key="k", transport=boom)
+    assert gen.compose(_candidate()) is None
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        None,
+        "",
+        "not json at all",
+        json.dumps(["a", "list"]),
+        json.dumps({k: v for k, v in _GOOD_REPLY.items() if k != "title"}),
+        json.dumps({**_GOOD_REPLY, "title": 7}),
+        json.dumps({**_GOOD_REPLY, "alternatives": "nope"}),
+        json.dumps({**_GOOD_REPLY, "alternatives": [1, 2]}),
+    ],
+)
+def test_neuroforge_generator_fails_closed_on_malformed_replies(reply):
+    gen = NeuroForgeCompositionGenerator(api_key="k", transport=_RecordingTransport(reply))
+    assert gen.compose(_candidate()) is None
+
+
+def test_parse_prose_strips_a_single_markdown_fence():
+    fenced = "```json\n" + json.dumps(_GOOD_REPLY) + "\n```"
+    assert _parse_prose(fenced) is not None
+
+
+def test_a_fabricating_neuroforge_reply_is_rejected_by_the_translator():
+    from app.services.cloud_proposal_candidate_translator import candidate_to_proposal_input
+
+    fabricated = {**_GOOD_REPLY, "problem_statement": "Actually 999 decisions occurred."}
+    gen = NeuroForgeCompositionGenerator(
+        api_key="k", transport=_RecordingTransport(json.dumps(fabricated))
+    )
+    assert candidate_to_proposal_input(_candidate(), ai_generator=gen) is None
