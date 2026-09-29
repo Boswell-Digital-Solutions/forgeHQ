@@ -145,6 +145,7 @@ def candidate_to_proposal_input(
             confidence_band=candidate.confidence_band,
             alternatives=[],
             diagnostic_artifact_ids=list(candidate.evidence_artifact_ids),
+            correlation_fingerprint=candidate.correlation_fingerprint,
         )
 
     if ai_generator is None:
@@ -171,4 +172,5 @@ def candidate_to_proposal_input(
         confidence_band=candidate.confidence_band,
         alternatives=list(prose.alternatives),
         diagnostic_artifact_ids=list(candidate.evidence_artifact_ids),
+        correlation_fingerprint=candidate.correlation_fingerprint,
     )
