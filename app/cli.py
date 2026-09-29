@@ -27,8 +27,15 @@ import os
 import sys
 from typing import Any
 
+from app.drivers.healing_publisher import DEFAULT_DATAFORGE_LOCAL_URL, publish_healing_proposal
 from app.drivers.learning_client import DEFAULT_NEUROFORGE_URL
 from app.schemas.code_fix_outcome import CodeFixOutcome
+from app.services.cloud_proposal_shaper import (
+    CloudProposalInput,
+    CloudProposalShaper,
+    CloudSubject,
+    to_cloud_proposal_envelope,
+)
 from app.services.self_healing_feed import run_feed
 from app.services.self_healing_runner import RunResult, build_live_runner
 
@@ -193,6 +200,81 @@ def run_self_heal_feed(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_cloud_propose(args: argparse.Namespace) -> int:
+    """Shape + publish one cloud-subject proposal end to end.
+
+    Input (``--input`` file or stdin): the CloudProposalInput fields as JSON —
+    service, environment, title, issueClass, problemStatement, evidenceSummary,
+    scopeSummary, recommendedAction, expectedGain, riskSummary, severity,
+    confidenceBand, alternatives, diagnosticArtifactIds. No signal-derived
+    detection exists yet (see cloud_proposal_shaper.py's module docstring) —
+    the caller composes the content; this command shapes and publishes it.
+    """
+    try:
+        doc = json.loads(_read_input(args.input))
+    except Exception as exc:  # noqa: BLE001 - report, never crash the caller
+        _emit_json({"status": "error", "stage": "parse", "error": f"{type(exc).__name__}: {exc}"})
+        return 1
+    if not isinstance(doc, dict):
+        _emit_json({"status": "error", "stage": "input", "error": "expected a JSON object"})
+        return 1
+
+    try:
+        proposal_input = CloudProposalInput(
+            subject=CloudSubject(
+                service=doc.get("service", ""),
+                environment=doc.get("environment", "production"),
+            ),
+            title=doc.get("title", ""),
+            issue_class=doc.get("issueClass", ""),
+            problem_statement=doc.get("problemStatement", ""),
+            evidence_summary=doc.get("evidenceSummary", ""),
+            scope_summary=doc.get("scopeSummary", ""),
+            recommended_action=doc.get("recommendedAction", ""),
+            expected_gain=doc.get("expectedGain", ""),
+            risk_summary=doc.get("riskSummary", ""),
+            severity=doc.get("severity", "low"),
+            confidence_band=doc.get("confidenceBand", "medium"),
+            alternatives=list(doc.get("alternatives", [])),
+            diagnostic_artifact_ids=list(doc.get("diagnosticArtifactIds", [])),
+        )
+    except Exception as exc:  # noqa: BLE001 - malformed input, report don't crash
+        _emit_json({"status": "error", "stage": "build_input", "error": f"{type(exc).__name__}: {exc}"})
+        return 1
+
+    proposal = CloudProposalShaper().shape(proposal_input)
+    if proposal is None:
+        _emit_json(
+            {
+                "status": "error",
+                "stage": "shape",
+                "error": "missing required field: service, title, or problemStatement",
+            }
+        )
+        return 1
+
+    envelope = to_cloud_proposal_envelope(proposal)
+    if args.no_publish:
+        _emit_json({"status": "shaped", "published": False, "envelope": envelope})
+        return 0
+
+    try:
+        response = publish_healing_proposal(envelope, dataforge_url=args.dataforge_local_url)
+    except Exception as exc:  # noqa: BLE001 - report, never crash the caller
+        _emit_json(
+            {
+                "status": "error",
+                "stage": "publish",
+                "error": f"{type(exc).__name__}: {exc}",
+                "event_id": proposal.event_id,
+            }
+        )
+        return 1
+
+    _emit_json({"status": "completed", "published": True, "response": response})
+    return 0
+
+
 def run_health(_args: argparse.Namespace) -> int:
     """Bounded, producer-owned self-check for the ecosystem-health topology.
 
@@ -209,6 +291,7 @@ def run_health(_args: argparse.Namespace) -> int:
     for label, module in (
         ("self_healing_runner", "app.services.self_healing_runner"),
         ("code_fix_shaper", "app.services.code_fix_shaper"),
+        ("cloud_proposal_shaper", "app.services.cloud_proposal_shaper"),
         ("signal_target_resolver", "app.services.signal_target_resolver"),
         ("healing_publisher", "app.drivers.healing_publisher"),
     ):
@@ -298,6 +381,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=int(os.getenv("FORGEHQ_MAX_SOURCE_AGE_MINUTES", str(DEFAULT_MAX_SOURCE_AGE_MINUTES))),
     )
     shf.set_defaults(func=run_self_heal_feed)
+
+    cp = sub.add_parser(
+        "cloud-propose",
+        help="Shape + publish one cloud-subject proposal (no local file target).",
+    )
+    cp.add_argument(
+        "--input",
+        default=None,
+        help="JSON: CloudProposalInput fields (default: stdin).",
+    )
+    cp.add_argument("--no-publish", action="store_true", help="Shape + emit but do not publish.")
+    cp.add_argument(
+        "--dataforge-local-url",
+        default=os.getenv("FORGEHQ_DATAFORGE_LOCAL_URL", DEFAULT_DATAFORGE_LOCAL_URL),
+    )
+    cp.set_defaults(func=run_cloud_propose)
 
     hp = sub.add_parser("health", help="Bounded self-check for the ecosystem-health topology.")
     hp.set_defaults(func=run_health)
