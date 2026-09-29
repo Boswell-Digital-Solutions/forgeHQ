@@ -151,3 +151,93 @@ class CloudProposalEligibilityGate:
             reason=f"{len(group.signals)} correlated signal(s), confidence={confidence_band}",
             signal_ids=group.signal_ids,
         )
+
+
+# --- Cross-source correlation (CSD-08) -----------------------------------
+#
+# CSD-02/CSD-06/CSD-07 each compute correlation.fingerprint in their own
+# independent identity space (CSSA keys on tenant/principal, CI on
+# repository+workflow, Render on service_id) -- two signals from different
+# sources about the same real incident (e.g. a GitHub repo's CI and the
+# Render service it deploys to) can never share a fingerprint by accident.
+# Recognizing they're the same real thing requires knowing the mapping
+# between a GitHub repo and a Render service ahead of time -- that mapping
+# is not derivable from any signal itself, and this module does not invent
+# one. SubjectAliasRegistry is caller-supplied, mechanism only: with an
+# empty registry (today -- no real aliases are known anywhere in this
+# ecosystem yet), every group stays standalone, fully backward compatible
+# with CSD-03's own single-source correlation.
+
+#: Maps a raw `CorrelatedSignalGroup.subject_identity_key` (e.g.
+#: `"repository:org/forgeHQ"`, `"service:neuroforge"`) to a canonical
+#: subject id the caller asserts represents the same real system. Supplying
+#: this mapping is a human/config decision, never inferred here.
+SubjectAliasRegistry = dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class MergedIncidentGroup:
+    """One or more `CorrelatedSignalGroup`s that share a canonical subject,
+    possibly from different sources. With no alias for a group's subject,
+    `canonical_subject_id` falls back to that group's own raw identity key,
+    so every group appears here even when nothing merged."""
+
+    canonical_subject_id: str
+    groups: tuple[CorrelatedSignalGroup, ...]
+
+    @property
+    def signal_ids(self) -> tuple[str, ...]:
+        ids: list[str] = []
+        for group in self.groups:
+            ids.extend(group.signal_ids)
+        return tuple(ids)
+
+    @property
+    def all_signals(self) -> tuple[CloudSignal, ...]:
+        signals: list[CloudSignal] = []
+        for group in self.groups:
+            signals.extend(group.signals)
+        return tuple(signals)
+
+    @property
+    def source_systems(self) -> tuple[str, ...]:
+        """Distinct `source_system` values across every merged signal, in
+        first-seen order -- e.g. `("github_actions", "render")` for a real
+        cross-source merge, or a single value when nothing merged."""
+        seen: set[str] = set()
+        systems: list[str] = []
+        for signal in self.all_signals:
+            if signal.source_system not in seen:
+                seen.add(signal.source_system)
+                systems.append(signal.source_system)
+        return tuple(systems)
+
+
+class CrossSourceCorrelator:
+    """Merges `CorrelatedSignalGroup`s (CSD-03's own single-source output)
+    into `MergedIncidentGroup`s using a caller-supplied `SubjectAliasRegistry`.
+    Fails closed to "no merge" for any group whose subject has no alias,
+    rather than guessing a cross-source relationship."""
+
+    def merge(
+        self,
+        groups: tuple[CorrelatedSignalGroup, ...],
+        *,
+        alias_registry: SubjectAliasRegistry | None = None,
+    ) -> tuple[MergedIncidentGroup, ...]:
+        registry = alias_registry or {}
+        merged: dict[str, list[CorrelatedSignalGroup]] = {}
+        order: list[str] = []
+
+        for group in groups:
+            raw_key = group.subject_identity_key
+            canonical = registry.get(raw_key, raw_key)
+            if canonical not in merged:
+                merged[canonical] = []
+                order.append(canonical)
+            merged[canonical].append(group)
+
+        return tuple(
+            MergedIncidentGroup(canonical_subject_id=canonical, groups=tuple(merged[canonical]))
+            for canonical in order
+        )
