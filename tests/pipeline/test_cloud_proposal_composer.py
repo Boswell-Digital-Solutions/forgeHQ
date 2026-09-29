@@ -28,12 +28,14 @@ def _signal(
     fingerprint: str = "fp-tenant-abc",
     severity: str = "high",
     summary: str = "3 block/quarantine decisions for principal principal-xyz within 15m (threshold 3).",
+    subject: CloudSignalSubject | None = None,
 ) -> CloudSignal:
     return CloudSignal(
         signal_id=signal_id,
         source_system="forgesentinel",
         source_kind="cssa_finding",
-        subject=CloudSignalSubject(subject_kind="identity", tenant_id="tenant-abc", principal_id="principal-xyz"),
+        subject=subject
+        or CloudSignalSubject(subject_kind="identity", tenant_id="tenant-abc", principal_id="principal-xyz"),
         issue_class=issue_class,
         severity=severity,
         observed_at="2026-09-29T07:00:00Z",
@@ -90,6 +92,41 @@ def test_composer_handles_quota_exceeded_burst_template():
     candidate = CloudProposalComposer().compose(group, outcome)
     assert candidate is not None
     assert candidate.recommended_action_class == "investigate_quota_exhaustion"
+
+
+def test_composer_handles_ci_workflow_failure_template():
+    group, outcome = _group_and_outcome(
+        [
+            _signal(
+                "sig-1",
+                issue_class="ci_workflow_failure",
+                fingerprint="fp-ci",
+                subject=CloudSignalSubject(subject_kind="repository", repository="org/forgeHQ"),
+                summary='Workflow "CI" failed on org/forgeHQ (run 123, commit abc123def456).',
+            )
+        ]
+    )
+    candidate = CloudProposalComposer().compose(group, outcome)
+    assert candidate is not None
+    assert candidate.recommended_action_class == "investigate_ci_workflow_failure"
+    assert candidate.subject.subject_kind == "repository"
+
+
+def test_composer_handles_deploy_failure_template():
+    group, outcome = _group_and_outcome(
+        [
+            _signal(
+                "sig-1",
+                issue_class="deploy_failure",
+                fingerprint="fp-deploy",
+                subject=CloudSignalSubject(service="neuroforge"),
+                summary='Render deploy failed for service "neuroforge" (event evt-1).',
+            )
+        ]
+    )
+    candidate = CloudProposalComposer().compose(group, outcome)
+    assert candidate is not None
+    assert candidate.recommended_action_class == "investigate_deploy_failure"
 
 
 def test_composer_fails_closed_on_unknown_issue_class():

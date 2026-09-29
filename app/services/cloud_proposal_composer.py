@@ -14,10 +14,11 @@ content. An `issue_class` with no known template is **not composed**; it
 fails closed rather than falling back to a generic guess. AI-assisted
 composition for unmapped classes is CSD-09, deliberately deferred.
 
-Only two issue classes have templates today: `denial_streak` and
-`quota_exceeded_burst`, forgesentinel's own two real, currently-shipped
-`DecisionWatchdog` detectors (`src/watchdog/decisions.ts`) -- not invented,
-matching what CSD-02's adapter can actually produce.
+Four issue classes have templates: `denial_streak` and `quota_exceeded_burst`
+(forgesentinel's two real detectors, `src/watchdog/decisions.ts`, CSD-02),
+`ci_workflow_failure` (CSD-06's GitHub Actions adapter), and `deploy_failure`
+(CSD-07's Render adapter) -- not invented, matching what each adapter can
+actually produce.
 """
 from __future__ import annotations
 
@@ -61,6 +62,14 @@ _ISSUE_CLASS_TEMPLATES: dict[str, _IssueClassTemplate] = {
     ),
     "quota_exceeded_burst": _IssueClassTemplate(
         recommended_action_class="investigate_quota_exhaustion",
+        facts=_facts_from_summaries,
+    ),
+    "ci_workflow_failure": _IssueClassTemplate(
+        recommended_action_class="investigate_ci_workflow_failure",
+        facts=_facts_from_summaries,
+    ),
+    "deploy_failure": _IssueClassTemplate(
+        recommended_action_class="investigate_deploy_failure",
         facts=_facts_from_summaries,
     ),
 }

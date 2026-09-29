@@ -8,9 +8,10 @@ and `to_cloud_proposal_envelope()` already know how to turn into a real
 
 DETERMINISTIC, NO LLM, same as CSD-04: every prose field here is templated
 from the candidate's own structured data (`facts`, `recommended_action_class`,
-`subject`, `constraints`) via a per-`issue_class` template, not inferred.
-Only the two issue classes CSD-04 can actually produce have templates today
-(`denial_streak`, `quota_exceeded_burst`); an unmapped `issue_class` fails
+`subject`, `constraints`) via a per-`recommended_action_class` template, not
+inferred. Covers every `recommended_action_class` CSD-04's composer can
+currently produce (`denial_streak`/`quota_exceeded_burst`/
+`ci_workflow_failure`/`deploy_failure`); an unmapped action class fails
 closed rather than composing generic prose.
 """
 from __future__ import annotations
@@ -25,6 +26,12 @@ def _subject_scope_summary(candidate: CloudProposalCandidate) -> str:
     subject = candidate.subject
     if subject.subject_kind == "service":
         return f"Service {subject.service} ({subject.environment})."
+    if subject.subject_kind == "repository":
+        # Missing until now: this branch didn't exist when CSD-06 introduced
+        # the "repository" subject_kind, so a CI-sourced candidate would have
+        # fallen through to the identity-shaped summary below and printed
+        # "Tenant unknown, principal unknown." Fixed here.
+        return f"Repository {subject.repository}."
     return f"Tenant {subject.tenant_id or 'unknown'}, principal {subject.principal_id or 'unknown'}."
 
 
@@ -58,6 +65,29 @@ _ACTION_TEMPLATES: dict[str, _ActionTemplate] = {
         expected_gain=(
             "Confirms whether the quota-exceeded burst is expected load or a runaway "
             "consumer, before it recurs or blocks legitimate traffic."
+        ),
+    ),
+    "investigate_ci_workflow_failure": _ActionTemplate(
+        title="Investigate CI workflow failure for {scope}",
+        recommended_action=(
+            "Review the correlated workflow failure(s) and confirm whether they reflect a "
+            "genuine regression or an environment/flake issue before merging or retrying."
+        ),
+        expected_gain=(
+            "Confirms whether the CI failure reflects a real regression, surfacing it for "
+            "review before it blocks or masks other work."
+        ),
+    ),
+    "investigate_deploy_failure": _ActionTemplate(
+        title="Investigate deployment failure for {scope}",
+        recommended_action=(
+            "Review the correlated deploy failure(s) and confirm whether the cause is a "
+            "genuine regression, configuration drift, or a transient infrastructure issue "
+            "before retrying the deploy."
+        ),
+        expected_gain=(
+            "Confirms whether the deployment failure reflects a real regression or "
+            "configuration drift, before another deploy attempt."
         ),
     ),
 }
