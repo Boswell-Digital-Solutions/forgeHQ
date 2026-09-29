@@ -1,17 +1,36 @@
-"""CI shadow run: real GitHub failures through the detector pipeline, nothing published.
+"""CI shadow run: real GitHub runs through the detector pipeline, nothing published.
 
 First live-data slice of BDS-FCO-CSD-v0.1's transport gate. For each
-repository: fetch recent failed workflow runs (`github_actions_client`),
-convert them (`github_workflow_adapter`), correlate, run the eligibility
-gate, and compose candidates (`cloud_proposal_composer`) -- then REPORT how
-much of that survived. This module has no publish path: it never touches
-DataForge-Local, Forge_Command, or any store, so running it can never put an
-entry in front of an operator.
+repository: fetch recent workflow runs of every conclusion
+(`github_actions_client`), keep the ones that are still-unrecovered recent
+failures, convert them (`github_workflow_adapter`), correlate, run the
+eligibility gate, and compose candidates (`cloud_proposal_composer`) -- then
+REPORT how much survived and why the rest was skipped. This module has no
+publish path: it never touches DataForge-Local, Forge_Command, or any store,
+so running it can never put an entry in front of an operator.
+
+WHAT COUNTS AS A CANDIDATE. A run with conclusion `failure` or
+`startup_failure` (see the adapter for why they differ). A candidate is
+skipped, and counted, when:
+
+- it is older than `max_age_days` (`runs_stale_skipped`), or its timestamps
+  are missing/unparseable so its age or order cannot be known (also counted
+  there); or
+- it has RECOVERED (`runs_recovered_skipped`): a later successful run exists
+  in the same scope. Scope for `failure` is (workflow, branch) -- a green
+  `main` does not clear a red PR branch. Scope for `startup_failure` is the
+  whole repository -- it is a repo-wide condition, and any later success on
+  any branch shows runs can start again.
+
+Found by running it on real repositories (see docs/KNOWN_ISSUES.md): without
+these checks it proposed month-old failures that had since cleared, and it
+could not see `startup_failure` at all.
 
 KNOWN LIMIT, stated so the numbers are not over-read: the eligibility gate is
 called with no open-proposal or cooldown knowledge (there is no read of
-DataForge-Local here), so `eligible` counts groups that would be eligible
-*ignoring* suppression. Publishing would need that read first.
+DataForge-Local here), so `eligible_ignoring_suppression` counts groups that
+would be eligible *ignoring* suppression. Publishing would need that read
+first.
 
 A repository that cannot be fetched is reported under `errors` and skipped;
 one bad repo never hides the others' results.
@@ -22,19 +41,25 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from app.drivers.github_actions_client import GitHubFetchError, fetch_failed_runs
+from app.drivers.github_actions_client import GitHubFetchError, fetch_recent_runs
 from app.services.cloud_proposal_composer import CloudProposalComposer
 from app.services.cloud_signal_correlation import (
     ELIGIBLE,
     CloudProposalEligibilityGate,
     CloudSignalCorrelator,
 )
-from app.services.github_workflow_adapter import github_workflow_run_to_cloud_signal
+from app.services.github_workflow_adapter import (
+    CONCLUSION_FAILURE,
+    CONCLUSION_STARTUP_FAILURE,
+    HANDLED_CONCLUSIONS,
+    github_workflow_run_to_cloud_signal,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class CiGroupReport:
     repository: str
+    issue_class: str
     fingerprint: str
     signal_count: int
     decision: str
@@ -47,9 +72,11 @@ class CiGroupReport:
 class CiShadowReport:
     repositories: list[str]
     runs_fetched: int = 0
+    candidate_runs: int = 0
+    runs_stale_skipped: int = 0
+    runs_recovered_skipped: int = 0
     signals_converted: int = 0
     signals_rejected: int = 0
-    runs_stale_skipped: int = 0
     groups: list[CiGroupReport] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)
 
@@ -65,9 +92,11 @@ class CiShadowReport:
         return {
             "repositories": self.repositories,
             "runs_fetched": self.runs_fetched,
+            "candidate_runs": self.candidate_runs,
+            "runs_stale_skipped": self.runs_stale_skipped,
+            "runs_recovered_skipped": self.runs_recovered_skipped,
             "signals_converted": self.signals_converted,
             "signals_rejected": self.signals_rejected,
-            "runs_stale_skipped": self.runs_stale_skipped,
             "groups": len(self.groups),
             "eligible_ignoring_suppression": self.eligible,
             "composed_candidates": self.composed,
@@ -75,6 +104,7 @@ class CiShadowReport:
             "group_detail": [
                 {
                     "repository": g.repository,
+                    "issue_class": g.issue_class,
                     "fingerprint": g.fingerprint,
                     "signals": g.signal_count,
                     "decision": g.decision,
@@ -88,36 +118,52 @@ class CiShadowReport:
         }
 
 
-def _is_recent(run: dict, cutoff: datetime) -> bool:
-    raw = run.get("updated_at")
+def _parse_ts(raw) -> datetime | None:
+    """A timezone-aware timestamp, or None when missing or unparseable."""
     if not isinstance(raw, str):
-        return False
+        return None
     try:
-        updated = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
-        return False
-    if updated.tzinfo is None:
-        return False
-    return updated >= cutoff
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _success_times(runs: list[dict]) -> list[tuple[datetime, str, str]]:
+    """(created_at, workflow name, branch) for every completed success."""
+    out = []
+    for run in runs:
+        if run.get("status") != "completed" or run.get("conclusion") != "success":
+            continue
+        created = _parse_ts(run.get("created_at"))
+        if created is not None:
+            out.append((created, run.get("name") or "", run.get("head_branch") or ""))
+    return out
+
+
+def _recovered(run: dict, created: datetime, successes: list[tuple[datetime, str, str]]) -> bool:
+    if run.get("conclusion") == CONCLUSION_STARTUP_FAILURE:
+        return any(t > created for t, _n, _b in successes)
+    name = run.get("name") or ""
+    branch = run.get("head_branch") or ""
+    return any(t > created and n == name and b == branch for t, n, b in successes)
 
 
 def run_ci_shadow(
     repositories: list[str],
     *,
     producer_version: str,
-    per_page: int = 30,
+    per_page: int = 100,
     max_age_days: int | None = 14,
     now: datetime | None = None,
-    fetch: Callable[..., list[dict]] = fetch_failed_runs,
+    fetch: Callable[..., list[dict]] = fetch_recent_runs,
 ) -> CiShadowReport:
-    """`max_age_days` skips runs whose `updated_at` is older than the window
-    (counted in `runs_stale_skipped`, not silently dropped). A run with a
-    missing or unparseable `updated_at` is also skipped, since its age is
-    unknown. `None` disables the window."""
+    """`max_age_days=None` disables the recency window."""
     report = CiShadowReport(repositories=list(repositories))
     cutoff = None
     if max_age_days is not None:
         cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=max_age_days)
+
     signals = []
     for repo in repositories:
         try:
@@ -126,9 +172,18 @@ def run_ci_shadow(
             report.errors[repo] = str(exc)
             continue
         report.runs_fetched += len(runs)
+        successes = _success_times(runs)
         for run in runs:
-            if cutoff is not None and not _is_recent(run, cutoff):
+            if run.get("status") != "completed" or run.get("conclusion") not in HANDLED_CONCLUSIONS:
+                continue
+            report.candidate_runs += 1
+            created = _parse_ts(run.get("created_at"))
+            updated = _parse_ts(run.get("updated_at"))
+            if created is None or updated is None or (cutoff is not None and updated < cutoff):
                 report.runs_stale_skipped += 1
+                continue
+            if _recovered(run, created, successes):
+                report.runs_recovered_skipped += 1
                 continue
             signal = github_workflow_run_to_cloud_signal(run, producer_version=producer_version)
             if signal is None:
@@ -146,6 +201,7 @@ def run_ci_shadow(
         report.groups.append(
             CiGroupReport(
                 repository=first.subject.repository or "",
+                issue_class=first.issue_class,
                 fingerprint=group.fingerprint,
                 signal_count=len(group.signals),
                 decision=outcome.decision,

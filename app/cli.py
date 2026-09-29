@@ -421,7 +421,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--repo", action="append", required=True, metavar="OWNER/NAME",
         help="Repository to read (repeatable).",
     )
-    ci.add_argument("--per-page", type=int, default=30, help="Runs per repo, 1-100.")
+    ci.add_argument("--per-page", type=int, default=100, help="Recent runs to read per repo, 1-100.")
     ci.add_argument(
         "--max-age-days", type=int, default=14,
         help="Skip failures older than this many days (0 = no limit).",

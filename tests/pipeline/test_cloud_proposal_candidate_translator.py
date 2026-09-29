@@ -108,6 +108,22 @@ def test_translator_handles_ci_workflow_failure_action_class():
     assert "CI workflow failure" in proposal_input.title
 
 
+def test_translator_handles_ci_startup_failure_action_class():
+    candidate = _candidate(
+        subject=CloudSignalSubject(subject_kind="repository", repository="org/forgeHQ"),
+        issue_class="ci_startup_failure",
+        recommended_action_class="investigate_ci_startup_failure",
+        facts=("A workflow run did not start on org/forgeHQ (startup_failure, run 1, commit abc123def456).",),
+    )
+    proposal_input = candidate_to_proposal_input(candidate)
+    assert proposal_input is not None
+    assert "startup failure" in proposal_input.title.lower()
+    assert "org/forgeHQ" in proposal_input.title
+    # The recommendation lists things to check; it does not assert a cause.
+    assert "billing" in proposal_input.recommended_action.lower()
+    assert "because" not in proposal_input.recommended_action.lower()
+
+
 def test_translator_handles_deploy_failure_action_class():
     candidate = _candidate(
         subject=CloudSignalSubject(service="neuroforge"),

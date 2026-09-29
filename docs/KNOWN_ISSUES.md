@@ -48,7 +48,7 @@ missing PACT checkout.
 
 **Scope:** open. Same incidental discovery as above.
 
-## CI Shadow Run Cannot See Recovery, Branch Scope, or `startup_failure` (Open, found 2026-09-29)
+## CI Shadow Run Cannot See Recovery, Branch Scope, or `startup_failure` (Fixed in PR #25, pending merge; found 2026-09-29)
 
 **What is wrong:** `python -m app ci-shadow` reads only runs with conclusion `failure`. Three real defects follow.
 
@@ -58,6 +58,12 @@ missing PACT checkout.
 
 **Root cause:** The adapter was scoped to "a completed run that failed" as the one unambiguous case (CSD-06), and the driver fetches only that slice. Recovery and `startup_failure` both need the full recent run history, not only the failures.
 
-**Fix:** None applied. Fetch recent runs of every conclusion, keyed by (repository, workflow, branch). Treat a later success on the same branch as recovery. Decide how `startup_failure` maps to an issue class before publishing anything.
+**Fix (PR #25, not yet merged):** The driver now fetches recent runs of every conclusion (no `status=failure` filter). The adapter handles `startup_failure` as its own issue class, `ci_startup_failure`, scoped to the repository. It does not require a name or branch for that conclusion, and its summary says only that the run did not start. Code failures are scoped to repository, workflow and branch. The shadow run skips and counts a failure that a later success in the same scope has cleared. For `failure` the scope is the same workflow and branch. For `startup_failure` it is the whole repository, since a later success on any branch shows that runs can start again. `ci_startup_failure` has composer and translator templates. The recommendation lists what to check and does not assert a cause.
 
-**Scope:** Open. Shadow mode publishes nothing, so no operator has seen a wrong entry. Publishing CI proposals must wait for this fix.
+**Verified live (read-only, 2026-09-29):** The stale `Forge CLI Quality Gate` group is gone. The run now reports one repo-wide `ci_startup_failure` group for `Forge_Command` (85 runs) and one for `forge` (100 runs). `forgeHQ` has no workflow runs at all, so it reports nothing.
+
+**Scope (open):**
+- The driver reads at most 100 runs per repository. `forge`'s newest 100 are all `startup_failure`, back to 2026-09-26, so 100 is a lower bound.
+- The cause of the `startup_failure` runs was not verified here. The forge workspace records it as the Actions billing lock (KI-FORGE-20260927-002). The detector deliberately asserts no cause.
+- The eligibility gate still has no open-proposal or cooldown knowledge. Publishing CI proposals must wait for a read of DataForge-Local.
+- GitHub's run list returned different sets for one repository between two invocations minutes apart, cause not established. Treat one run as a snapshot.

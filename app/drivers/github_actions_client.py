@@ -1,9 +1,11 @@
-"""github_actions_client -- read failed workflow runs via the `gh` CLI.
+"""github_actions_client -- read recent workflow runs via the `gh` CLI.
 
-READ-ONLY, one GET per repository: `repos/{owner}/{repo}/actions/runs`
-filtered to `status=failure`. It uses the operator's own `gh` login (the
-same one used for every other GitHub call on this machine), so it needs no
-new secret and opens no inbound port. forgeHQ never reads or stores the
+READ-ONLY, one GET per repository: `repos/{owner}/{repo}/actions/runs`,
+every conclusion. Failures alone are not enough: judging recovery needs the
+later successes, and the `startup_failure` conclusion (a run that never
+started) is not returned by a `status=failure` filter. It uses the operator's
+own `gh` login (the same one used for every other GitHub call on this
+machine), so it needs no new secret and opens no inbound port. forgeHQ never reads or stores the
 token; `gh` handles authentication.
 
 The `gh` invocation is injectable so tests never touch the network or the
@@ -34,19 +36,19 @@ def _default_runner(argv: list[str]) -> str:
     return completed.stdout
 
 
-def fetch_failed_runs(
+def fetch_recent_runs(
     repo: str,
     *,
-    per_page: int = 30,
+    per_page: int = 100,
     runner: Callable[[list[str]], str] | None = None,
 ) -> list[dict]:
-    """Return the most recent workflow runs whose conclusion is `failure`."""
+    """Return the most recent workflow runs of any conclusion, newest first."""
     if not _REPO_RE.match(repo):
         raise GitHubFetchError(f"invalid repository name: {repo!r}")
     if not 1 <= per_page <= 100:
         raise GitHubFetchError("per_page must be between 1 and 100")
 
-    argv = ["gh", "api", f"repos/{repo}/actions/runs?status=failure&per_page={per_page}"]
+    argv = ["gh", "api", f"repos/{repo}/actions/runs?per_page={per_page}"]
     try:
         stdout = (runner or _default_runner)(argv)
     except GitHubFetchError:

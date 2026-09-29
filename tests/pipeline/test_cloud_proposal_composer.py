@@ -112,6 +112,23 @@ def test_composer_handles_ci_workflow_failure_template():
     assert candidate.subject.subject_kind == "repository"
 
 
+def test_composer_handles_ci_startup_failure_template():
+    group, outcome = _group_and_outcome(
+        [
+            _signal(
+                "sig-1",
+                issue_class="ci_startup_failure",
+                fingerprint="fp-startup",
+                subject=CloudSignalSubject(subject_kind="repository", repository="org/forgeHQ"),
+                summary="A workflow run did not start on org/forgeHQ (startup_failure, run 1, commit abc123def456).",
+            )
+        ]
+    )
+    candidate = CloudProposalComposer().compose(group, outcome)
+    assert candidate is not None
+    assert candidate.recommended_action_class == "investigate_ci_startup_failure"
+
+
 def test_composer_handles_deploy_failure_template():
     group, outcome = _group_and_outcome(
         [
