@@ -23,16 +23,19 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 
+from app.services.cloud_signal_contracts import CloudSignalSubject, is_valid_subject
+
 CLOUD_PROPOSAL_SCHEMA = "cloud.proposal.v1"
 SOURCE_SYSTEM = "forgehq"
 
-
-@dataclass(frozen=True)
-class CloudSubject:
-    """What the proposal is about: a deployed service, not a repo file."""
-
-    service: str
-    environment: str = "production"
+# What the proposal is about: a deployed service (subject_kind "service") or
+# a principal/tenant identity (subject_kind "identity"). Reuses CSD-01's
+# CloudSignalSubject rather than a second, independent identity concept --
+# a divergent local CloudSubject with only `service` is exactly what made
+# CSD-02's adapter unable to publish real CSSA findings in the first place
+# (BDS-FCO-CSD-v0.1's correction). Kept as this name for every existing
+# caller (app/cli.py, this module's own tests) constructing it by keyword.
+CloudSubject = CloudSignalSubject
 
 
 @dataclass(frozen=True)
@@ -72,7 +75,7 @@ class CloudProposal:
         # rather than repository/file_path/rule.
         i = self.input
         digest = hashlib.sha256(
-            f"{i.subject.service}\0{i.subject.environment}\0{i.title}\0{i.issue_class}".encode()
+            f"{i.subject.identity_key}\0{i.subject.environment}\0{i.title}\0{i.issue_class}".encode()
         ).hexdigest()[:16]
         return f"forgehq-cloud-{digest}"
 
@@ -84,7 +87,7 @@ class CloudProposalShaper:
 
     def shape(self, proposal_input: CloudProposalInput) -> CloudProposal | None:
         i = proposal_input
-        if not i.subject.service.strip() or not i.title.strip() or not i.problem_statement.strip():
+        if not is_valid_subject(i.subject) or not i.title.strip() or not i.problem_statement.strip():
             return None
         return CloudProposal(input=i)
 
@@ -97,8 +100,18 @@ def to_cloud_proposal_envelope(proposal: CloudProposal) -> dict:
     `healing_proposals` table) since a cloud subject has neither. `payload`
     carries exactly the fields Forge_Command's `CloudProposal` frontend type
     expects, so the Rust bridge forwards it without translation.
+
+    Forge_Command's frontend `service: string` is required, non-optional --
+    an identity-scoped subject has no `service` value, so `payload.service`
+    falls back to `subject.identity_key` (e.g. `"identity:tenant-abc:principal-xyz"`)
+    rather than sending null or fabricating a fake service name. The prefix
+    makes it legible in the UI as an identity, not a service, even though
+    the wire field is still named `service`.
     """
     i = proposal.input
+    service_display = (
+        i.subject.service if i.subject.subject_kind == "service" else i.subject.identity_key
+    )
     return {
         "event_id": proposal.event_id,
         "source_system": SOURCE_SYSTEM,
@@ -109,7 +122,7 @@ def to_cloud_proposal_envelope(proposal: CloudProposal) -> dict:
         "payload": {
             "kind": "cloud_proposal",
             "title": i.title,
-            "service": i.subject.service,
+            "service": service_display,
             "environment": i.subject.environment,
             "issueClass": i.issue_class,
             "confidenceBand": i.confidence_band,
