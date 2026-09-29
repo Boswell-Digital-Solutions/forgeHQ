@@ -3,7 +3,7 @@
 Non-authoritative candidate proposal and evaluation workbench (generator / critic pipeline).
 Python 3.12+, standard-library-first contracts.
 
-Canonical reference: `doc/system/` → root `SYSTEM.md` (`bash doc/system/BUILD.sh`).
+Canonical reference: `doc/system/` → `doc/FRGSYSTEM.md` (`bash doc/system/BUILD.sh`).
 Repo governance boundary: `docs/architecture/forgehq-system-role.md`.
 
 ---

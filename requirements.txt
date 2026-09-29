@@ -1,1 +1,3 @@
 pytest==7.4.3
+httpx==0.28.1  # runtime: app/lineage/reviewability.py imports it at module level
+jsonschema==4.26.0  # test-only: tests/pipeline/test_pact_verification_bridge.py

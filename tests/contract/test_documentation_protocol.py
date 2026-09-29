@@ -4,6 +4,9 @@ import subprocess
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SYSTEM_DIR = REPO_ROOT / "doc" / "system"
+# The compiled reference is doc/<CODE>SYSTEM.md (designation FRG), assembled by
+# doc/system/BUILD.sh -- not a root-level SYSTEM.md, which the retired layout used.
+COMPILED_SYSTEM = REPO_ROOT / "doc" / "FRGSYSTEM.md"
 REFERENCE_DIR = REPO_ROOT / "docs" / "reference" / "bds"
 QA_DIR = REPO_ROOT / "docs" / "qa"
 
@@ -20,7 +23,7 @@ def test_required_documentation_surfaces_exist():
     required_paths = [
         REPO_ROOT / "CLAUDE.md",
         REPO_ROOT / "FORGEHQ_COMPREHENSIVE_TEST_PLAN.md",
-        REPO_ROOT / "SYSTEM.md",
+        COMPILED_SYSTEM,
         REPO_ROOT / "docs" / "forge_hq_architecture_spec.md",
         REPO_ROOT / "docs" / "forge_hq_extended_roadmap.md",
         QA_DIR / "README.md",
@@ -43,16 +46,18 @@ def test_required_documentation_surfaces_exist():
         assert path.exists(), f"missing required documentation surface: {path}"
 
 
-def test_system_md_matches_modular_documentation_sources():
-    assert (REPO_ROOT / "SYSTEM.md").read_text() == _expected_system_text()
+def test_compiled_system_doc_matches_modular_documentation_sources():
+    assert COMPILED_SYSTEM.read_text() == _expected_system_text()
 
 
 def test_index_table_of_contents_covers_all_numbered_part_files():
     index_text = (SYSTEM_DIR / "_index.md").read_text()
 
+    # The TOC is a table of `| §N | `NN-name.md` | ... |` rows.
     for part in sorted(SYSTEM_DIR.glob("[0-9][0-9]-*.md")):
         section_number = part.name.split("-", 1)[0].lstrip("0") or "0"
-        assert f"{section_number}. [" in index_text, f"missing TOC entry for {part.name}"
+        row_prefix = f"| §{section_number} | `{part.name}` |"
+        assert row_prefix in index_text, f"missing TOC row for {part.name}"
 
 
 def test_context_bundle_generated_artifact_is_gitignored():
@@ -66,7 +71,7 @@ def test_company_core_protocols_are_available_under_reference_directory():
     assert (REFERENCE_DIR / "BDS_DOCUMENTATION_LIFECYCLE_AND_DRIFT_PROTOCOL.md").exists()
 
 
-def test_build_script_reassembles_system_md_successfully():
+def test_build_script_reassembles_compiled_system_doc_successfully():
     result = subprocess.run(
         ["bash", "doc/system/BUILD.sh"],
         cwd=REPO_ROOT,
@@ -74,7 +79,10 @@ def test_build_script_reassembles_system_md_successfully():
         capture_output=True,
         text=True,
     )
-    assert "SYSTEM.md assembled:" in result.stdout
+    # BUILD.sh prints one line: BUILD_OK designation=FRG output=... parts=N lines=M
+    part_count = len(list(SYSTEM_DIR.glob("[0-9][0-9]-*.md")))
+    assert "BUILD_OK designation=FRG output=doc/FRGSYSTEM.md" in result.stdout
+    assert f"parts={part_count} " in result.stdout
 
 
 def test_context_bundle_script_supports_required_flags():
