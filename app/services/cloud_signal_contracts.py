@@ -70,22 +70,27 @@ def is_admissible_evidence_source(source_ref: str) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class CloudSignalSubject:
-    """What the signal is about -- either a deployed service (`subject_kind`
-    "service") or a principal/tenant identity (`subject_kind` "identity").
+    """What the signal is about -- a deployed service (`subject_kind`
+    "service"), a principal/tenant identity (`subject_kind` "identity"), or a
+    source-code repository (`subject_kind` "repository").
 
     Widened from service-only after finding forgesentinel's two real
     detectors (`denial_streak`, `quota_exceeded_burst`,
     `src/watchdog/decisions.ts`) never populate `scope.cloud_service` at
     all -- they are principal/tenant-scoped identity anomalies, not
     service-outage observations, and forcing a `service` value onto them
-    would mean inventing one. `subject_kind` defaults to "service" so every
-    existing service-scoped construction stays valid unchanged."""
+    would mean inventing one. Widened again for `repository` after CSD-06's
+    GitHub Actions adapter: a CI workflow failure is scoped to a repository,
+    not a service or an identity either. `subject_kind` defaults to
+    "service" so every existing service-scoped construction stays valid
+    unchanged."""
 
     subject_kind: str = "service"
     environment: str = "production"
     service: str | None = None
     tenant_id: str | None = None
     principal_id: str | None = None
+    repository: str | None = None
 
     @property
     def identity_key(self) -> str:
@@ -93,6 +98,8 @@ class CloudSignalSubject:
         of `subject_kind`."""
         if self.subject_kind == "service":
             return f"service:{self.service}"
+        if self.subject_kind == "repository":
+            return f"repository:{self.repository}"
         return f"identity:{self.tenant_id or ''}:{self.principal_id or ''}"
 
 
@@ -107,6 +114,8 @@ def is_valid_subject(subject: CloudSignalSubject) -> bool:
             (subject.tenant_id and subject.tenant_id.strip())
             or (subject.principal_id and subject.principal_id.strip())
         )
+    if subject.subject_kind == "repository":
+        return bool(subject.repository and subject.repository.strip())
     return False
 
 
