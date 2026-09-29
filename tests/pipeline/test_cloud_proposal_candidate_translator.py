@@ -4,6 +4,7 @@ Ties CSD-04's composer output to the already-shipped Phase-1 shaper: every
 field this module produces must be deterministic and traceable back to the
 candidate's own structured data, never invented.
 """
+from app.services.cloud_proposal_ai_composer import ComposedProse, DeterministicStubCompositionGenerator
 from app.services.cloud_proposal_candidate_translator import candidate_to_proposal_input
 from app.services.cloud_signal_contracts import CloudProposalCandidateShaper, CloudSignalSubject
 
@@ -122,6 +123,68 @@ def test_translator_handles_deploy_failure_action_class():
 def test_translator_fails_closed_on_unknown_recommended_action_class():
     candidate = _candidate(recommended_action_class="some_future_action_class")
     assert candidate_to_proposal_input(candidate) is None
+
+
+# --- CSD-09: opt-in bounded AI composition fallback ----------------------
+
+
+def test_translator_still_fails_closed_on_unknown_class_without_an_ai_generator():
+    # No ai_generator passed -- must behave exactly as before CSD-09 existed.
+    candidate = _candidate(recommended_action_class="some_future_action_class")
+    assert candidate_to_proposal_input(candidate, ai_generator=None) is None
+
+
+def test_translator_uses_ai_generator_when_action_class_is_unmapped():
+    candidate = _candidate(recommended_action_class="some_future_action_class")
+    proposal_input = candidate_to_proposal_input(
+        candidate, ai_generator=DeterministicStubCompositionGenerator()
+    )
+    assert proposal_input is not None
+    assert proposal_input.title.strip() != ""
+    # AI never sets severity/confidence_band -- always the candidate's own.
+    assert proposal_input.severity == candidate.severity
+    assert proposal_input.confidence_band == candidate.confidence_band
+
+
+def test_translator_prefers_deterministic_template_over_ai_generator_when_both_available():
+    # A known action class must never be routed through AI composition, even
+    # when a generator is supplied -- the deterministic path always wins.
+    candidate = _candidate()  # investigate_policy_denial_pattern, has a template
+
+    class _ExplodingGenerator:
+        def compose(self, candidate):
+            raise AssertionError("AI generator must not be called for a mapped action class")
+
+    proposal_input = candidate_to_proposal_input(candidate, ai_generator=_ExplodingGenerator())
+    assert proposal_input is not None
+
+
+def test_translator_fails_closed_when_ai_generator_declines():
+    candidate = _candidate(recommended_action_class="some_future_action_class")
+
+    class _DecliningGenerator:
+        def compose(self, candidate):
+            return None
+
+    assert candidate_to_proposal_input(candidate, ai_generator=_DecliningGenerator()) is None
+
+
+def test_translator_fails_closed_when_ai_output_fails_validation():
+    candidate = _candidate(recommended_action_class="some_future_action_class")
+
+    class _FabricatingGenerator:
+        def compose(self, candidate):
+            return ComposedProse(
+                title="Investigate the incident",
+                problem_statement="Actually 999 decisions were observed.",
+                evidence_summary="1 correlated signal.",
+                scope_summary="Tenant tenant-abc.",
+                recommended_action="Escalate immediately.",
+                expected_gain="Confirms the real scale.",
+                risk_summary="no production mutation authorized",
+            )
+
+    assert candidate_to_proposal_input(candidate, ai_generator=_FabricatingGenerator()) is None
 
 
 def test_translator_carries_evidence_artifact_ids_through():
