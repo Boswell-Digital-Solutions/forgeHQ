@@ -68,6 +68,46 @@ def test_event_id_differs_for_different_subjects():
     assert a.event_id != b.event_id
 
 
+def test_shape_accepts_identity_scoped_subject():
+    # Widened after BDS-FCO-CSD-v0.1's own correction: CSD-04's composer
+    # only ever produces identity-scoped candidates (forgesentinel's two
+    # real detectors), so this shaper must be able to publish them.
+    proposal_input = _input(subject=CloudSubject(subject_kind="identity", tenant_id="tenant-abc"))
+    proposal = CloudProposalShaper().shape(proposal_input)
+    assert proposal is not None
+    assert proposal.input.subject.subject_kind == "identity"
+
+
+def test_shape_fails_closed_on_identity_subject_with_no_identity_fields():
+    proposal_input = _input(subject=CloudSubject(subject_kind="identity"))
+    assert CloudProposalShaper().shape(proposal_input) is None
+
+
+def test_envelope_service_field_falls_back_to_identity_key_for_identity_subject():
+    proposal_input = _input(
+        subject=CloudSubject(subject_kind="identity", tenant_id="tenant-abc", principal_id="principal-xyz")
+    )
+    proposal = CloudProposalShaper().shape(proposal_input)
+    assert proposal is not None
+    env = to_cloud_proposal_envelope(proposal)
+    # Always a non-null string (Forge_Command's frontend type requires
+    # service: string), legibly prefixed so it reads as an identity, not a
+    # fabricated service name.
+    assert env["payload"]["service"] == "identity:tenant-abc:principal-xyz"
+
+
+def test_event_id_differs_between_service_and_identity_subjects_with_overlapping_names():
+    # A service literally named "tenant-abc" must not collide with an
+    # identity subject whose tenant_id is "tenant-abc" -- identity_key's
+    # "service:"/"identity:" prefixing keeps them distinct.
+    a = CloudProposalShaper().shape(_input(subject=CloudSubject(service="tenant-abc")))
+    b = CloudProposalShaper().shape(
+        _input(subject=CloudSubject(subject_kind="identity", tenant_id="tenant-abc"))
+    )
+    assert a is not None and b is not None
+    assert a.event_id != b.event_id
+
+
 def test_envelope_matches_cloud_proposal_contract():
     proposal = CloudProposalShaper().shape(_input())
     assert proposal is not None
