@@ -30,6 +30,7 @@ from typing import Any
 from app.drivers.healing_publisher import DEFAULT_DATAFORGE_LOCAL_URL, publish_healing_proposal
 from app.drivers.learning_client import DEFAULT_NEUROFORGE_URL
 from app.schemas.code_fix_outcome import CodeFixOutcome
+from app.services.ci_publish import PublishRefused, execute_publications, plan_publications
 from app.services.ci_shadow import load_suppression, run_ci_shadow
 from app.services.cloud_proposal_shaper import (
     CloudProposalInput,
@@ -297,6 +298,45 @@ def run_ci_shadow_cmd(args: argparse.Namespace) -> int:
     return 1 if report.errors and len(report.errors) == len(report.repositories) else 0
 
 
+def run_ci_publish_cmd(args: argparse.Namespace) -> int:
+    """Publish the CI shadow run's eligible proposals to DataForge-Local.
+
+    DRY RUN unless --confirm-publish. Refuses if it cannot prove the proposals
+    are not duplicates (store unreadable or truncated)."""
+    suppression, status = load_suppression(
+        base_url=args.dataforge_local_url, cooldown_days=args.cooldown_days
+    )
+    report = run_ci_shadow(
+        args.repo,
+        producer_version="ci-shadow-1",
+        per_page=args.per_page,
+        max_age_days=args.max_age_days or None,
+        suppression=suppression,
+        suppression_status=status,
+    )
+    try:
+        plan = plan_publications(report, max_publish=args.max_publish)
+    except PublishRefused as exc:
+        _emit_json({"status": "refused", "reason": str(exc), "published": 0})
+        return 1
+    results = execute_publications(
+        plan, confirm=args.confirm_publish, base_url=args.dataforge_local_url
+    )
+    failed = any(r["outcome"] == "error" for r in results)
+    _emit_json(
+        {
+            "status": "error" if failed else "ok",
+            "mode": "publish" if args.confirm_publish else "dry_run",
+            "would_publish": len(plan.items),
+            "published": sum(1 for r in results if r["outcome"] == "stored"),
+            "plan": plan.to_dict(),
+            "results": results,
+            "shadow_errors": report.errors,
+        }
+    )
+    return 1 if failed else 0
+
+
 def run_health(_args: argparse.Namespace) -> int:
     """Bounded, producer-owned self-check for the ecosystem-health topology.
 
@@ -447,6 +487,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not read DataForge-Local; would_publish is then null.",
     )
     ci.set_defaults(func=run_ci_shadow_cmd)
+
+    cpub = sub.add_parser(
+        "ci-publish",
+        help="Publish eligible CI proposals to DataForge-Local. Dry run unless --confirm-publish.",
+    )
+    cpub.add_argument("--repo", action="append", required=True, metavar="OWNER/NAME")
+    cpub.add_argument("--per-page", type=int, default=100)
+    cpub.add_argument("--max-age-days", type=int, default=14)
+    cpub.add_argument("--cooldown-days", type=int, default=14)
+    cpub.add_argument("--max-publish", type=int, default=3, help="Upper bound per run.")
+    cpub.add_argument(
+        "--dataforge-local-url",
+        default=os.getenv("FORGEHQ_DATAFORGE_LOCAL_URL", DEFAULT_DATAFORGE_LOCAL_URL),
+    )
+    cpub.add_argument(
+        "--confirm-publish", action="store_true",
+        help="Actually send. Without this flag nothing is written.",
+    )
+    cpub.set_defaults(func=run_ci_publish_cmd)
 
     hp = sub.add_parser("health", help="Bounded self-check for the ecosystem-health topology.")
     hp.set_defaults(func=run_health)

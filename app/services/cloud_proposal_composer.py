@@ -33,16 +33,24 @@ from app.services.cloud_signal_contracts import (
 from app.services.cloud_signal_correlation import ELIGIBLE, CorrelatedSignalGroup, EligibilityOutcome
 
 
+MAX_LISTED_FACTS = 5
+
+
 def _facts_from_summaries(group: CorrelatedSignalGroup) -> tuple[str, ...]:
     # Each signal's own summary is already a factual sentence written by the
     # detector that observed it -- reusing it, deduplicated and in order,
     # rather than paraphrasing or inferring anything new.
     seen: set[str] = set()
-    facts: list[str] = []
+    unique: list[str] = []
     for signal in group.signals:
         if signal.summary not in seen:
             seen.add(signal.summary)
-            facts.append(signal.summary)
+            unique.append(signal.summary)
+    # A real group can hold 100 signals (one repo-wide incident); listing every
+    # summary made an unreadable review-queue entry (~12,000 characters).
+    facts = unique[:MAX_LISTED_FACTS]
+    if len(unique) > MAX_LISTED_FACTS:
+        facts.append(f"{len(unique) - MAX_LISTED_FACTS} further similar signal(s) not listed.")
     facts.append(f"{len(group.signals)} correlated signal(s) observed for this fingerprint.")
     return tuple(facts)
 
