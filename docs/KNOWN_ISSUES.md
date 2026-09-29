@@ -47,3 +47,17 @@ the same `pytest.skip("pact not available")` pattern the rest of the test alread
 missing PACT checkout.
 
 **Scope:** open. Same incidental discovery as above.
+
+## CI Shadow Run Cannot See Recovery, Branch Scope, or `startup_failure` (Open, found 2026-09-29)
+
+**What is wrong:** `python -m app ci-shadow` reads only runs with conclusion `failure`. Three real defects follow.
+
+1. **No recovery check.** A failure that later cleared still shows as an active group. Live check on 2026-09-29: the shadow run flagged `Forge CLI Quality Gate` in `Forge_Command` (4 failures inside the 14-day window). That workflow's newest run is a success from 2026-09-24.
+2. **No branch scope.** A failed run on a throwaway PR branch counts as a repository-level signal. The one failure I inspected (run `35825913344`, 2026-09-23) was on the PR branch `Boswecw-patch-1`. Recovery must therefore be judged per branch, not per repository. A success on `main` does not clear a failed PR branch.
+3. **`startup_failure` is invisible.** Every run listed on `Forge_Command` at 2026-09-29T18:51Z had conclusion `startup_failure`. `github_workflow_adapter.py` rejects any conclusion other than `failure`, and the `status=failure` filter in `github_actions_client.py` never fetches it. So the shadow run showed a stale, cleared failure and missed the problem that is happening now. The forge workspace records the cause as the Actions billing lock (KI-FORGE-20260927-002); I did not re-verify that cause.
+
+**Root cause:** The adapter was scoped to "a completed run that failed" as the one unambiguous case (CSD-06), and the driver fetches only that slice. Recovery and `startup_failure` both need the full recent run history, not only the failures.
+
+**Fix:** None applied. Fetch recent runs of every conclusion, keyed by (repository, workflow, branch). Treat a later success on the same branch as recovery. Decide how `startup_failure` maps to an issue class before publishing anything.
+
+**Scope:** Open. Shadow mode publishes nothing, so no operator has seen a wrong entry. Publishing CI proposals must wait for this fix.
