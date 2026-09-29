@@ -12,12 +12,17 @@ from the candidate's own structured data (`facts`, `recommended_action_class`,
 inferred. Covers every `recommended_action_class` CSD-04's composer can
 currently produce (`denial_streak`/`quota_exceeded_burst`/
 `ci_workflow_failure`/`deploy_failure`); an unmapped action class fails
-closed rather than composing generic prose.
+closed rather than composing generic prose -- UNLESS the caller explicitly
+opts into bounded AI composition (CSD-09, `cloud_proposal_ai_composer.py`)
+by passing `ai_generator`. Opt-in only: every existing call site that
+doesn't pass one keeps today's exact fail-closed behavior on an unmapped
+class, so AI composition can never become a silent catch-all.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.services.cloud_proposal_ai_composer import CompositionGenerator, validate_composed_prose
 from app.services.cloud_proposal_shaper import CloudProposalInput
 from app.services.cloud_signal_contracts import CloudProposalCandidate
 
@@ -93,32 +98,65 @@ _ACTION_TEMPLATES: dict[str, _ActionTemplate] = {
 }
 
 
-def candidate_to_proposal_input(candidate: CloudProposalCandidate) -> CloudProposalInput | None:
+def candidate_to_proposal_input(
+    candidate: CloudProposalCandidate,
+    *,
+    ai_generator: CompositionGenerator | None = None,
+) -> CloudProposalInput | None:
     """Translate a `CloudProposalCandidate` into a `CloudProposalInput`.
 
     Fails closed (returns None) when `recommended_action_class` has no known
-    template -- matching CSD-04's own composer, this never falls back to
-    generic prose for something it doesn't recognize.
+    deterministic template AND no `ai_generator` was supplied -- matching
+    CSD-04's own composer, this never falls back to generic prose for
+    something it doesn't recognize. When `ai_generator` IS supplied and the
+    action class is unmapped, tries bounded AI composition (CSD-09) instead;
+    its output must still pass `validate_composed_prose()` or this still
+    fails closed.
     """
+    scope = _subject_scope_summary(candidate)
     template = _ACTION_TEMPLATES.get(candidate.recommended_action_class)
-    if template is None:
+
+    if template is not None:
+        return CloudProposalInput(
+            subject=candidate.subject,
+            title=template.title.format(scope=scope),
+            issue_class=candidate.issue_class,
+            problem_statement=" ".join(candidate.facts),
+            evidence_summary=(
+                f"{len(candidate.signal_ids)} correlated signal(s): {', '.join(candidate.signal_ids)}."
+            ),
+            scope_summary=scope,
+            recommended_action=template.recommended_action,
+            expected_gain=template.expected_gain,
+            risk_summary="; ".join(candidate.constraints),
+            severity=candidate.severity,
+            confidence_band=candidate.confidence_band,
+            alternatives=[],
+            diagnostic_artifact_ids=list(candidate.evidence_artifact_ids),
+        )
+
+    if ai_generator is None:
         return None
 
-    scope = _subject_scope_summary(candidate)
+    prose = ai_generator.compose(candidate)
+    if prose is None:
+        return None
+    accepted, _reason = validate_composed_prose(candidate, prose)
+    if not accepted:
+        return None
+
     return CloudProposalInput(
         subject=candidate.subject,
-        title=template.title.format(scope=scope),
+        title=prose.title,
         issue_class=candidate.issue_class,
-        problem_statement=" ".join(candidate.facts),
-        evidence_summary=(
-            f"{len(candidate.signal_ids)} correlated signal(s): {', '.join(candidate.signal_ids)}."
-        ),
-        scope_summary=scope,
-        recommended_action=template.recommended_action,
-        expected_gain=template.expected_gain,
-        risk_summary="; ".join(candidate.constraints),
+        problem_statement=prose.problem_statement,
+        evidence_summary=prose.evidence_summary,
+        scope_summary=prose.scope_summary,
+        recommended_action=prose.recommended_action,
+        expected_gain=prose.expected_gain,
+        risk_summary=prose.risk_summary,
         severity=candidate.severity,
         confidence_band=candidate.confidence_band,
-        alternatives=[],
+        alternatives=list(prose.alternatives),
         diagnostic_artifact_ids=list(candidate.evidence_artifact_ids),
     )
