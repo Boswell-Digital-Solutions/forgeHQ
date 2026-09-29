@@ -52,6 +52,7 @@ from app.services.cloud_signal_correlation import (
     CloudProposalEligibilityGate,
     CloudSignalCorrelator,
 )
+from app.services.cloud_signal_contracts import CloudProposalCandidate
 from app.services.proposal_suppression import SuppressionSets, build_suppression_sets
 from app.services.github_workflow_adapter import (
     CONCLUSION_FAILURE,
@@ -87,6 +88,9 @@ class CiShadowReport:
     errors: dict[str, str] = field(default_factory=dict)
     suppression_status: str = "not_read"
     suppression: SuppressionSets | None = None
+    # Composed candidates for groups the gate passed, newest group first.
+    # Not part of to_dict(); a publisher reads them.
+    candidates: list[CloudProposalCandidate] = field(default_factory=list)
 
     @property
     def eligible(self) -> int:
@@ -257,6 +261,8 @@ def run_ci_shadow(
             else raw
         )
         candidate = composer.compose(group, outcome)
+        if candidate is not None:
+            report.candidates.append(candidate)
         first = group.signals[0]
         report.groups.append(
             CiGroupReport(

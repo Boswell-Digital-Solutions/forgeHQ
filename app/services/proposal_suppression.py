@@ -23,7 +23,7 @@ LIMITS, stated so the sets are not over-read:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from app.drivers.proposal_store_reader import StoreSnapshot
@@ -39,6 +39,11 @@ class SuppressionSets:
     rows_read: int
     rows_without_fingerprint: int
     truncated_statuses: tuple[str, ...]
+    # Stored proposals per fingerprint, every status read. The next
+    # proposal for a fingerprint takes this as its generation. If a status
+    # listing was truncated this can undercount; a clash with an existing id
+    # is then a harmless no-op in the idempotent store.
+    generation_by_fingerprint: dict = field(default_factory=dict)
 
 
 def _parse(raw) -> datetime | None:
@@ -61,10 +66,12 @@ def build_suppression_sets(
     open_fps: set[str] = set()
     cooling: set[str] = set()
     without = 0
+    generations: dict[str, int] = {}
     for proposal in snapshot.proposals:
         if proposal.fingerprint is None:
             without += 1
             continue
+        generations[proposal.fingerprint] = generations.get(proposal.fingerprint, 0) + 1
         if proposal.status in OPEN_STATUSES:
             open_fps.add(proposal.fingerprint)
         elif proposal.status in DECIDED_STATUSES:
@@ -77,4 +84,5 @@ def build_suppression_sets(
         rows_read=len(snapshot.proposals),
         rows_without_fingerprint=without,
         truncated_statuses=snapshot.truncated_statuses,
+        generation_by_fingerprint=generations,
     )

@@ -65,6 +65,10 @@ class CloudProposalInput:
     # suppresses on this. None for hand-composed proposals, which therefore
     # can never suppress anything.
     correlation_fingerprint: str | None = None
+    # How many proposals already exist for this fingerprint. 0 for the first;
+    # a recurrence after the cooldown is generation 1, a new row that
+    # supersedes the old one. Only meaningful with a fingerprint.
+    generation: int = 0
 
 
 @dataclass(frozen=True)
@@ -79,9 +83,17 @@ class CloudProposal:
         # mirrors CodeFixProposal.event_id's approach, keyed on subject + title
         # rather than repository/file_path/rule.
         i = self.input
-        digest = hashlib.sha256(
-            f"{i.subject.identity_key}\0{i.subject.environment}\0{i.title}\0{i.issue_class}".encode()
-        ).hexdigest()[:16]
+        if i.correlation_fingerprint:
+            # Detector-made proposal: identity is the incident, never the
+            # wording. Same fingerprint + same generation is the same row, so a
+            # double publish is a no-op in the idempotent store.
+            key = (
+                f"{i.subject.identity_key}\0{i.subject.environment}\0{i.issue_class}\0"
+                f"{i.correlation_fingerprint}\0{i.generation}"
+            )
+        else:
+            key = f"{i.subject.identity_key}\0{i.subject.environment}\0{i.title}\0{i.issue_class}"
+        digest = hashlib.sha256(key.encode()).hexdigest()[:16]
         return f"forgehq-cloud-{digest}"
 
 
@@ -142,7 +154,10 @@ def to_cloud_proposal_envelope(proposal: CloudProposal) -> dict:
             # Only present when set, so envelopes for hand-composed
             # proposals are byte-for-byte what they were before.
             **(
-                {"correlationFingerprint": i.correlation_fingerprint}
+                {
+                    "correlationFingerprint": i.correlation_fingerprint,
+                    "proposalGeneration": i.generation,
+                }
                 if i.correlation_fingerprint
                 else {}
             ),

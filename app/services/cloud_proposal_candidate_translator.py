@@ -24,7 +24,7 @@ from dataclasses import dataclass
 
 from app.services.cloud_proposal_ai_composer import CompositionGenerator, validate_composed_prose
 from app.services.cloud_proposal_shaper import CloudProposalInput
-from app.services.cloud_signal_contracts import CloudProposalCandidate
+from app.services.cloud_signal_contracts import CloudProposalCandidate, summarize_ids
 
 
 def _subject_scope_summary(candidate: CloudProposalCandidate) -> str:
@@ -114,6 +114,7 @@ def candidate_to_proposal_input(
     candidate: CloudProposalCandidate,
     *,
     ai_generator: CompositionGenerator | None = None,
+    generation: int = 0,
 ) -> CloudProposalInput | None:
     """Translate a `CloudProposalCandidate` into a `CloudProposalInput`.
 
@@ -135,7 +136,8 @@ def candidate_to_proposal_input(
             issue_class=candidate.issue_class,
             problem_statement=" ".join(candidate.facts),
             evidence_summary=(
-                f"{len(candidate.signal_ids)} correlated signal(s): {', '.join(candidate.signal_ids)}."
+                f"{len(candidate.signal_ids)} correlated signal(s): "
+                f"{summarize_ids(candidate.signal_ids)}."
             ),
             scope_summary=scope,
             recommended_action=template.recommended_action,
@@ -146,6 +148,7 @@ def candidate_to_proposal_input(
             alternatives=[],
             diagnostic_artifact_ids=list(candidate.evidence_artifact_ids),
             correlation_fingerprint=candidate.correlation_fingerprint,
+            generation=generation,
         )
 
     if ai_generator is None:
@@ -173,4 +176,5 @@ def candidate_to_proposal_input(
         alternatives=list(prose.alternatives),
         diagnostic_artifact_ids=list(candidate.evidence_artifact_ids),
         correlation_fingerprint=candidate.correlation_fingerprint,
+        generation=generation,
     )

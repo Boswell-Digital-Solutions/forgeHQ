@@ -58,6 +58,17 @@ _ADMISSIBLE_EVIDENCE_SCHEMES = frozenset({"signal"})
 _MANDATORY_CANDIDATE_CONSTRAINT = "no production mutation authorized"
 
 
+MAX_LISTED_IDS = 5
+
+
+def summarize_ids(ids: tuple[str, ...]) -> str:
+    """First few ids, then a count -- a real group can hold 100 signals, and
+    a review-queue entry must stay readable."""
+    listed = ", ".join(ids[:MAX_LISTED_IDS])
+    extra = len(ids) - MAX_LISTED_IDS
+    return listed if extra <= 0 else f"{listed}, and {extra} more"
+
+
 def is_admissible_evidence_source(source_ref: str) -> bool:
     """True only for `signal://...` refs. Deliberately excludes `cloud://`,
     which forgeHQ's general intake admits but which this detector must not

@@ -53,7 +53,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.services.cloud_signal_contracts import CloudProposalCandidate
+from app.services.cloud_signal_contracts import CloudProposalCandidate, summarize_ids
 
 _NUMBER_RE = re.compile(r"\d+")
 
@@ -106,7 +106,8 @@ class DeterministicStubCompositionGenerator:
             title=f"Investigate {candidate.issue_class} for {scope}",
             problem_statement=facts_joined,
             evidence_summary=(
-                f"{len(candidate.signal_ids)} correlated signal(s): {', '.join(candidate.signal_ids)}."
+                f"{len(candidate.signal_ids)} correlated signal(s): "
+                f"{summarize_ids(candidate.signal_ids)}."
             ),
             scope_summary=scope.capitalize() + ".",
             recommended_action=(
