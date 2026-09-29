@@ -79,6 +79,46 @@ def test_translator_service_scoped_candidate_uses_service_scope_summary():
     assert proposal_input.scope_summary == "Service neuroforge (production)."
 
 
+def test_translator_repository_scoped_candidate_uses_repository_scope_summary():
+    # Bug fix: this branch didn't exist until now -- a repository-scoped
+    # candidate previously fell through to the identity-shaped summary and
+    # printed "Tenant unknown, principal unknown."
+    candidate = _candidate(
+        subject=CloudSignalSubject(subject_kind="repository", repository="org/forgeHQ"),
+        issue_class="ci_workflow_failure",
+        recommended_action_class="investigate_ci_workflow_failure",
+        facts=('Workflow "CI" failed on org/forgeHQ (run 123, commit abc123def456).',),
+    )
+    proposal_input = candidate_to_proposal_input(candidate)
+    assert proposal_input is not None
+    assert proposal_input.scope_summary == "Repository org/forgeHQ."
+    assert "org/forgeHQ" in proposal_input.title
+
+
+def test_translator_handles_ci_workflow_failure_action_class():
+    candidate = _candidate(
+        subject=CloudSignalSubject(subject_kind="repository", repository="org/forgeHQ"),
+        issue_class="ci_workflow_failure",
+        recommended_action_class="investigate_ci_workflow_failure",
+        facts=('Workflow "CI" failed on org/forgeHQ (run 123, commit abc123def456).',),
+    )
+    proposal_input = candidate_to_proposal_input(candidate)
+    assert proposal_input is not None
+    assert "CI workflow failure" in proposal_input.title
+
+
+def test_translator_handles_deploy_failure_action_class():
+    candidate = _candidate(
+        subject=CloudSignalSubject(service="neuroforge"),
+        issue_class="deploy_failure",
+        recommended_action_class="investigate_deploy_failure",
+        facts=('Render deploy failed for service "neuroforge" (event evt-1).',),
+    )
+    proposal_input = candidate_to_proposal_input(candidate)
+    assert proposal_input is not None
+    assert "deployment failure" in proposal_input.title.lower()
+
+
 def test_translator_fails_closed_on_unknown_recommended_action_class():
     candidate = _candidate(recommended_action_class="some_future_action_class")
     assert candidate_to_proposal_input(candidate) is None
