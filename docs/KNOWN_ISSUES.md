@@ -4,7 +4,7 @@ Findings tracked per the ecosystem-wide findings protocol (`forge/CLAUDE.md`): a
 cause, gap, or open process/tracking state, recorded here rather than only in chat or memory.
 
 ## 2026-09-29 — `tests/contract/test_documentation_protocol.py` asserts the pre-migration
-`doc/system/` shape; four tests fail against current, correct output
+`doc/system/` shape; four tests fail against current, correct output (Fixed, pending merge)
 
 **What's wrong:** `test_required_documentation_surfaces_exist`,
 `test_system_md_matches_modular_documentation_sources`,
@@ -28,13 +28,21 @@ updated to match:
 1063 lines, snapshot validation passes) — the doc system is not broken. The test asserts a shape
 that no longer exists.
 
-**Fix:** none applied. This needs the contract test's assertions updated to the current
-`<CODE>SYSTEM.md` / table-TOC / `BUILD_OK ...` convention, not a doc/system change.
+**Fix (pending merge):** The four assertions now match the current convention: the compiled
+reference is `doc/FRGSYSTEM.md`; the TOC check looks for each `| §N | \`NN-name.md\` |` row; and
+the build test checks `BUILD_OK designation=FRG output=doc/FRGSYSTEM.md parts=N` with `N` counted
+from the chapter files instead of a fixed string. Two tests were renamed to say what they check
+(`test_compiled_system_doc_matches_modular_documentation_sources`,
+`test_build_script_reassembles_compiled_system_doc_successfully`). No `doc/system/` change was
+needed. Checked that the fixed tests still fail on drift: a stale compiled doc and a missing TOC
+row are both caught.
 
-**Scope:** open. Found incidentally while running the full suite for the `BDS-FCO-CSD-v0.1`
-(Cloud Subject Detector) slices — not touched or fixed as part of that unrelated work.
+**Scope:** Closed once merged, for these four tests. `CLAUDE.md` pointed at a root `SYSTEM.md`; it now points at
+`doc/FRGSYSTEM.md`. Open: `FORGEHQ_COMPREHENSIVE_TEST_PLAN.md` still says it was generated from
+`SYSTEM.md` v1.2 (2026-04-03) and that the build reports `SYSTEM.md assembled`. It is a dated
+planning document, so it was not rewritten here.
 
-## 2026-09-29 — `tests/pipeline/test_pact_verification_bridge.py::test_grounding_refs_conform_to_real_pact_schema` fails on a fresh `.venv`
+## 2026-09-29 — `tests/pipeline/test_pact_verification_bridge.py::test_grounding_refs_conform_to_real_pact_schema` fails on a fresh `.venv` (Fixed, pending merge)
 
 **What's wrong:** `ModuleNotFoundError: No module named 'jsonschema'`.
 
@@ -42,11 +50,33 @@ that no longer exists.
 `.venv`, but this one test imports it directly to validate a grounding-ref payload against a real
 PACT schema.
 
-**Fix:** none applied — add `jsonschema` to the repo's dependency set, or gate the import with
-the same `pytest.skip("pact not available")` pattern the rest of the test already uses for a
-missing PACT checkout.
+**Fix (pending merge):** `jsonschema==4.26.0` is pinned in `requirements.txt`, marked test-only. The test now
+runs and passes rather than being skipped. Verified in a fresh virtualenv built only from
+`requirements.txt`, not just the project `.venv`.
 
-**Scope:** open. Same incidental discovery as above.
+**Scope:** Closed once merged.
+
+## 2026-09-29 — `httpx` is imported at runtime but was never declared; `tests/lineage/` could not be collected (Fixed, pending merge)
+
+**What's wrong:** `app/lineage/reviewability.py` imports `httpx` at module level, and
+`tests/lineage/_lineage_harness.py` uses it. `requirements.txt` declared only `pytest`. In a
+fresh `.venv`, `tests/lineage/test_forgehq_emitter.py` failed at collection with
+`ModuleNotFoundError: No module named 'httpx'`.
+
+**Also worth knowing:** This was never recorded. Every earlier full-suite run in this file's
+history reported "5 pre-existing failures" while passing `--ignore=tests/lineage/test_forgehq_emitter.py`,
+so the real count was five failures plus one collection error, and the ignored module's tests were
+never run in those counts.
+
+**Root cause:** `httpx` was installed ad hoc in some environments and never added to the
+dependency file. It is a runtime dependency of the app, not only of tests.
+
+**Fix (pending merge):** `httpx==0.28.1` is pinned in `requirements.txt`. Verified in a fresh
+virtualenv built only from `requirements.txt`: the full suite runs with nothing ignored, 613 passed, 1 skipped, 0 failed. The skip is
+`test_live_pact_verification_is_bundle_bound`, which needs a live PACT bundle.
+
+**Scope:** Closed once merged. The lineage SDK is a sibling checkout on `sys.path`
+(`contracts/forge_lineage/sdk`), not an installable package, so it is not in `requirements.txt`.
 
 ## CI Shadow Run Cannot See Recovery, Branch Scope, or `startup_failure` (Fixed in PR #25, pending merge; found 2026-09-29)
 
