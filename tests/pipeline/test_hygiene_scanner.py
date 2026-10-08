@@ -4,6 +4,8 @@ Covers: finds fixable files, leaves clean files alone, skips VCS/build dirs and
 non-text/oversized files, is read-only, and its proposals adapt to the
 healing.code_fix.v1 envelope.
 """
+import hashlib
+
 from pathlib import Path
 
 from app.drivers.hygiene_scanner import scan_repo_for_hygiene_fixes
@@ -17,11 +19,11 @@ def _write(root: Path, rel: str, content: str) -> None:
 
 
 def test_scanner_finds_only_fixable_text_files(tmp_path):
-    _write(tmp_path, "fixable.py", "x = 1   \ny = 2")          # ws + no newline
-    _write(tmp_path, "clean.py", "x = 1\n")                     # already clean
-    _write(tmp_path, "skip.bin", "x = 1")                       # non-text suffix
-    _write(tmp_path, ".git/config", "bad   ")                   # in a skip dir
-    _write(tmp_path, "node_modules/lib.js", "y=2")              # in a skip dir
+    _write(tmp_path, "fixable.py", "x = 1   \ny = 2")  # ws + no newline
+    _write(tmp_path, "clean.py", "x = 1\n")  # already clean
+    _write(tmp_path, "skip.bin", "x = 1")  # non-text suffix
+    _write(tmp_path, ".git/config", "bad   ")  # in a skip dir
+    _write(tmp_path, "node_modules/lib.js", "y=2")  # in a skip dir
 
     proposals = scan_repo_for_hygiene_fixes(tmp_path, "demo-repo")
 
@@ -48,5 +50,7 @@ def test_scanner_proposals_adapt_to_envelope(tmp_path):
     assert env["payload"]["proposed_edit"] == {
         "repository": "demo-repo",
         "file_path": "pkg/mod.py",
+        "base_content_sha256": "sha256:"
+        + hashlib.sha256("a = 1\t\n".encode()).hexdigest(),
         "content": "a = 1\n",
     }
