@@ -11,6 +11,7 @@ contract. The POST is idempotent server-side (dedup on envelope.event_id).
 from __future__ import annotations
 
 import json
+import os
 import urllib.request
 
 DEFAULT_DATAFORGE_LOCAL_URL = "http://127.0.0.1:8005"
@@ -37,6 +38,9 @@ def publish_healing_proposal(
         data=body,
         headers={"Content-Type": "application/json"},
         method="POST",
+    )
+    request.add_unredirected_header(
+        "Authorization", "Bearer " + os.environ.get("HEALING_PRODUCER_TOKEN", "")
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))

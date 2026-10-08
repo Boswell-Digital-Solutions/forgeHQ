@@ -715,6 +715,19 @@ and fail-closed: a seed that reaches no bundle is skipped with `no_walk_path` (f
 `resolution="walked"` for honest provenance. (FC-side wiring of Tier-B subgraphs into its tick is a
 follow-up; today the live tick seeds bundle nodes directly = Tier-A.)
 
+## Healing proposal preconditions (2026-10-08)
+
+`healing.code_fix.v1` proposed edits include `base_content_sha256`, computed from
+the exact current-content UTF-8 bytes. Forge_Command checks that precondition
+before applying to a governed repository; stale proposals must be regenerated.
+The hash is a candidate precondition, never approval authority.
+
+The healing publisher and proposal-store reader send `HEALING_PRODUCER_TOKEN`
+from backend configuration. DataForge-Local requires this dedicated credential
+(at least 32 bytes). It cannot record operator decisions; the operator credential
+is held separately by Forge_Command. Coordinate this client update with the
+DataForge-Local healing authentication migration.
+
 ---
 
 # §15 — Scope

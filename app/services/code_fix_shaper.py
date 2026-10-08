@@ -185,6 +185,8 @@ def to_healing_code_fix_envelope(proposal: CodeFixProposal) -> dict:
                 "repository": proposal.repository,
                 "file_path": proposal.file_path,
                 "content": proposal.new_content,
+                "base_content_sha256": "sha256:"
+                + hashlib.sha256(proposal.current_content.encode("utf-8")).hexdigest(),
             },
         },
     }

@@ -4,6 +4,8 @@ Covers each rule, fail-closed no-ops, deterministic event_id, and that the
 adapted envelope matches the DataForge-Local contract the FC bridge applies
 (payload.proposed_edit.content = the full new file content).
 """
+import hashlib
+
 from app.services.code_fix_shaper import (
     HEALING_CODE_FIX_SCHEMA,
     SOURCE_SYSTEM,
@@ -32,7 +34,9 @@ def test_missing_trailing_newline_fix():
 
 
 def test_trailing_whitespace_fix():
-    proposal = CodeFixShaper().shape(_issue("trailing_whitespace", "x = 1   \ny = 2\t\n"))
+    proposal = CodeFixShaper().shape(
+        _issue("trailing_whitespace", "x = 1   \ny = 2\t\n")
+    )
     assert proposal is not None
     assert proposal.new_content == "x = 1\ny = 2\n"
 
@@ -98,5 +102,7 @@ def test_envelope_matches_healing_code_fix_contract():
     assert edit == {
         "repository": "sandbox-demo",
         "file_path": "calc.py",
+        "base_content_sha256": "sha256:"
+        + hashlib.sha256(proposal.current_content.encode()).hexdigest(),
         "content": "x = 1\n",
     }

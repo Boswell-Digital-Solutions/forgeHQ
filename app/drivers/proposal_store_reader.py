@@ -13,6 +13,7 @@ store. The HTTP call is injectable so tests never touch the network.
 from __future__ import annotations
 
 import json
+import os
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
@@ -45,24 +46,37 @@ class StoreSnapshot:
 
 
 def _default_get(url: str, timeout: float) -> dict:
-    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 - fixed http(s) base
+    request = urllib.request.Request(url)
+    request.add_unredirected_header(
+        "Authorization", "Bearer " + os.environ.get("HEALING_PRODUCER_TOKEN", "")
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - fixed http(s) base
         return json.loads(response.read().decode("utf-8"))
 
 
 def _to_proposal(item: dict) -> StoredCloudProposal | None:
     envelope = item.get("envelope")
-    if not isinstance(envelope, dict) or envelope.get("schema_version") != CLOUD_PROPOSAL_SCHEMA:
+    if (
+        not isinstance(envelope, dict)
+        or envelope.get("schema_version") != CLOUD_PROPOSAL_SCHEMA
+    ):
         return None
-    payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else {}
+    payload = (
+        envelope.get("payload") if isinstance(envelope.get("payload"), dict) else {}
+    )
     decision = item.get("decision") if isinstance(item.get("decision"), dict) else {}
     fingerprint = payload.get("correlationFingerprint")
     return StoredCloudProposal(
         proposal_id=str(item.get("proposal_id") or ""),
         status=str(item.get("status") or ""),
-        fingerprint=fingerprint if isinstance(fingerprint, str) and fingerprint else None,
+        fingerprint=fingerprint
+        if isinstance(fingerprint, str) and fingerprint
+        else None,
         issue_class=str(payload.get("issueClass") or ""),
         decided_at=decision.get("at") if isinstance(decision.get("at"), str) else None,
-        created_at=item.get("created_at") if isinstance(item.get("created_at"), str) else None,
+        created_at=item.get("created_at")
+        if isinstance(item.get("created_at"), str)
+        else None,
     )
 
 
@@ -92,4 +106,6 @@ def read_cloud_proposals(
             proposal = _to_proposal(item) if isinstance(item, dict) else None
             if proposal is not None:
                 proposals.append(proposal)
-    return StoreSnapshot(proposals=tuple(proposals), truncated_statuses=tuple(truncated))
+    return StoreSnapshot(
+        proposals=tuple(proposals), truncated_statuses=tuple(truncated)
+    )
