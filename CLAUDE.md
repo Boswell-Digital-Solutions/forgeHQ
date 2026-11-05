@@ -8,6 +8,10 @@ Repo governance boundary: `docs/architecture/forgehq-system-role.md`.
 
 ---
 
+## Repo Identity
+
+- Default branch: main
+
 ## Authority
 
 **forgeHQ is non-authoritative.** It proposes and evaluates candidates; it never mints canonical
