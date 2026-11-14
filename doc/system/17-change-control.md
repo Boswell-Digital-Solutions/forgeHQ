@@ -11,7 +11,7 @@ here authorizes public-release or production-certification claims.
 
 | Class | Scope | Example |
 |-------|-------|---------|
-| C0 | Documentation only | Editing `doc/system/` chapters, rebuilding `doc/FRGSYSTEM.md` |
+| C0 | Documentation only | Editing `doc/system/` chapters, rebuilding `doc/frgSYSTEM.md` |
 | C1 | Proposal artifact model | Shape/fields of a shaped proposal (§7) |
 | C2 | Pipeline / reviewability | Signal→proposal flow, inspectability contract (§8) |
 | C3 | Signal intake | Scheme-based intake from eval/cloud feeders |
@@ -22,7 +22,7 @@ here authorizes public-release or production-certification claims.
 ## Required Evidence Per Change Class
 
 - **C0** — rebuilt artifact (`bash doc/system/BUILD.sh` → `BUILD_OK`), edited
-  source chapter (never a hand-edit to `doc/FRGSYSTEM.md`).
+  source chapter (never a hand-edit to `doc/frgSYSTEM.md`).
 - **C1** — the artifact-model change reflected in §7 with provenance preserved.
 - **C2** — evidence each pipeline step remains inspectable/reviewable (no opaque
   shaping); forgeHQ shapes, it does not decide/approve/apply.
@@ -35,7 +35,7 @@ here authorizes public-release or production-certification claims.
 
 ```bash
 python -m pytest -q                     # full suite
-bash doc/system/BUILD.sh                # doc changes (C0) -> BUILD_OK designation=FRG
+bash doc/system/BUILD.sh                # doc changes (C0) -> BUILD_OK designation=frg
 ```
 
 ## Authority / Boundary Rules
@@ -47,7 +47,7 @@ DataForge. Shaped proposals carry provenance and remain reviewable end-to-end.
 ## Documentation Change Rules (C0)
 
 `doc/system/` source modules are the only editing surface. The compiled
-`doc/FRGSYSTEM.md` is regenerated, never hand-edited (§16). Snapshot facts are
+`doc/frgSYSTEM.md` is regenerated, never hand-edited (§16). Snapshot facts are
 re-measured and re-dated, not asserted as guarantees.
 
 ## Release / Readiness Claim Rules

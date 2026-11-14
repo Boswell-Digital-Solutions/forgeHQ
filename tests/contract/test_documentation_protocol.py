@@ -4,9 +4,9 @@ import subprocess
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SYSTEM_DIR = REPO_ROOT / "doc" / "system"
-# The compiled reference is doc/<CODE>SYSTEM.md (designation FRG), assembled by
+# The compiled reference is doc/<CODE>SYSTEM.md (designation frg), assembled by
 # doc/system/BUILD.sh -- not a root-level SYSTEM.md, which the retired layout used.
-COMPILED_SYSTEM = REPO_ROOT / "doc" / "FRGSYSTEM.md"
+COMPILED_SYSTEM = REPO_ROOT / "doc" / "frgSYSTEM.md"
 REFERENCE_DIR = REPO_ROOT / "docs" / "reference" / "bds"
 QA_DIR = REPO_ROOT / "docs" / "qa"
 
@@ -79,9 +79,9 @@ def test_build_script_reassembles_compiled_system_doc_successfully():
         capture_output=True,
         text=True,
     )
-    # BUILD.sh prints one line: BUILD_OK designation=FRG output=... parts=N lines=M
+    # BUILD.sh prints one line: BUILD_OK designation=frg output=... parts=N lines=M
     part_count = len(list(SYSTEM_DIR.glob("[0-9][0-9]-*.md")))
-    assert "BUILD_OK designation=FRG output=doc/FRGSYSTEM.md" in result.stdout
+    assert "BUILD_OK designation=frg output=doc/frgSYSTEM.md" in result.stdout
     assert f"parts={part_count} " in result.stdout
 
 
