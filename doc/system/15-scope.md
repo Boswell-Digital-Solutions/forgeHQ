@@ -3,8 +3,8 @@
 **Truth class:** canonical doctrine
 
 This `doc/system/` tree is the modular source of the **forgeHQ compiled system
-reference**, assembled into the designation-bound artifact `doc/FRGSYSTEM.md`
-(designation `FRG`) via `bash doc/system/BUILD.sh`. This chapter defines forgeHQ's
+reference**, assembled into the designation-bound artifact `doc/frgSYSTEM.md`
+(designation `frg`) via `bash doc/system/BUILD.sh`. This chapter defines forgeHQ's
 service authority and where it ends. forgeHQ is an internal Forge ecosystem
 service — not a public product, not a SaaS offering, and nothing here asserts
 public-release or production-certification status.
