@@ -3,6 +3,88 @@
 Findings tracked per the ecosystem-wide findings protocol (`forge/CLAUDE.md`): a bug, root
 cause, gap, or open process/tracking state, recorded here rather than only in chat or memory.
 
+## 2026-11-15 — `15-scope.md` says forgeHQ is "not the Forge_Command self-heal lane", and `14-ecosystem-integration.md` says the Forge_Command self-healing tick spawns forgeHQ entrypoints (Open)
+
+**Source:** BDS-ORG-ARCH-AUDIT-2026-11, doc/system pass, at `forgeHQ@fbe44d5c0e`. Evidence class:
+**Documented**. The audit read `doc/system/` only. It read no source code.
+
+**What's wrong:**
+
+- `15-scope.md:L32-L33` lists, under "What forgeHQ Does Not Own": "The Forge_Command
+  self-healing / approve-apply lane. forgeHQ is its own service, not the FC lane".
+- `14-ecosystem-integration.md:L18` says ForgeCommand is "also the producer trigger" and that
+  its self-healing tick spawns `python -m app self-heal`. `:L29-L49` describes the entrypoints
+  `self-heal` and `self-heal-feed`. `:L35` says ForgeCommand injects `NEUROFORGE_API_KEY` at
+  spawn.
+- No text reconciles the two. A reader cannot tell if forgeHQ is the proposal-producing worker
+  of the self-heal lane, or a separate service that only shares a trigger.
+- The docs never name ForgeAgents or BugCheck. They disclaim orchestration and scheduling
+  (`15-scope.md:L37`).
+
+**Root cause:** not determined. `15-scope.md` states the 2026-04 position. `14-ecosystem-integration.md`
+holds the 2026-06-10 and 2026-10-08 additions.
+
+**Fix:** none applied. Recommendation, not ruled: state in `15-scope.md` that forgeHQ is the
+producer that the Forge_Command self-healing lane invokes, and that Forge_Command keeps
+approve and apply. Run `bash doc/system/BUILD.sh` after the edit.
+
+**Scope:** Open.
+
+## 2026-11-15 — Nine chapters describe the 2026-04-04 state and contradict `14-ecosystem-integration.md` (Open)
+
+**Source:** BDS-ORG-ARCH-AUDIT-2026-11, doc/system pass, at `forgeHQ@fbe44d5c0e`. Evidence class:
+**Documented**. The audit read `doc/system/` only. It read no source code, so it does not say
+which side is right.
+
+**What's wrong:**
+
+- `06-api-layer.md:L3` says forgeHQ "currently exposes no HTTP or RPC API".
+  `11-ai-integration.md:L3` says it "has no runtime AI inference surface".
+  `18-configuration.md:L3` says the repository "does not define service-runtime environment
+  variables". `14-ecosystem-integration.md:L31-L36` says `self-heal` runs a NeuroForge
+  generation step and reads `NEUROFORGE_API_KEY`. `:L71-L75` names a `HEALING_PRODUCER_TOKEN`.
+  Neither variable is in `18-configuration.md`.
+- `10-database-schema.md:L3-L7` and `:L18` (dated 2026-04-04), `09-backend.md:L43` and
+  `02-architecture.md:L54` say persistence is in-memory and the DataForge wire adapter is
+  pending. `14-ecosystem-integration.md:L7-L9` says the healing publisher calls DataForge-Local
+  directly.
+- `20-handover-migration-notes.md:L14` and `:L19` give "Phases 0–6 complete" and "159 tests
+  passing" as of 2026-04-04. The doc set was migrated on 2026-06-19 and extended on 2026-10-08.
+  The count was not measured again.
+- Chapters 1, 2, 9, 10, 11, 13, 18 and 19 carry the same early state (audit list). Chapter 20 is the
+  handover snapshot.
+
+**Root cause:** not determined. The later sections were added in chapter 14 only.
+
+**Fix:** none applied. Recommendation, not ruled: update each chapter from source, or add a
+dated-snapshot banner to the ones that stay as history.
+
+**Scope:** Open.
+
+## 2026-11-15 — Doc tree: section numbers differ from file order, five chapters tell the reader to rebuild a root `SYSTEM.md` that does not exist, and the appendix is a stub (Open)
+
+**Source:** BDS-ORG-ARCH-AUDIT-2026-11, doc/system pass, at `forgeHQ@fbe44d5c0e`. Evidence class:
+**Observed (doc tree)**.
+
+**What's wrong:**
+
+- Section headings inside the chapters keep the legacy numbers. `03-project-structure.md` has
+  "4.1", "4.2" and "4.3". `10-database-schema.md` has "11.x". The same mismatch is in files 04, 05,
+  06, 07, 08, 14 and 18.
+- `03-project-structure.md:L42`, `:L58` and `:L67`, `18-configuration.md:L17`,
+  `19-testing-infrastructure.md:L49` and `20-handover-migration-notes.md:L21` name a root
+  `SYSTEM.md` as the build output. The tree has none. `16-governance.md:L32-L33` calls a root
+  `SYSTEM.md` non-canonical. The build output is `doc/frgSYSTEM.md`.
+- `21-appendices.md:L7-L13` lists one "unmapped legacy chapter", `forgeHQ — Complete System
+  Reference`. The part holds no appendix content.
+
+**Root cause:** not determined. The tree was migrated on 2026-06-19 and the legacy numbers were
+kept.
+
+**Fix:** none applied.
+
+**Scope:** Open.
+
 ## 2026-09-29 — `tests/contract/test_documentation_protocol.py` asserts the pre-migration
 `doc/system/` shape; four tests fail against current, correct output (Fixed, pending merge)
 
